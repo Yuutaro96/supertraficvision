@@ -75,14 +75,39 @@ class Settings:
         self.model_size: str = "m"
         # FPS objetivo de procesamiento por cámara
         self.target_fps: int = 15
-        # Dispositivo: "cpu" o "cuda" (GPU)
-        self.device: str = "cpu"
+        # Dispositivo: "auto" (detecta GPU), "cpu" o "cuda" (GPU)
+        self.device: str = "auto"
         # IOU threshold para NMS
         self.iou: float = 0.5
 
     @property
     def model_name(self) -> str:
         return f"yolov8{self.model_size}.pt"
+
+    @property
+    def resolved_device(self) -> str:
+        """
+        Resuelve el dispositivo real a usar.
+
+        - "auto"  -> "cuda" si hay GPU NVIDIA disponible, si no "cpu".
+        - "cuda"/"gpu" -> "cuda" si está disponible, si no "cpu" (con aviso).
+        - "cpu"   -> "cpu".
+        """
+        pref = (self.device or "auto").lower()
+        try:
+            import torch
+            has_cuda = torch.cuda.is_available()
+        except Exception:
+            has_cuda = False
+
+        if pref in ("auto", ""):
+            return "cuda:0" if has_cuda else "cpu"
+        if pref in ("cuda", "gpu", "cuda:0", "0"):
+            if has_cuda:
+                return "cuda:0"
+            print("[config] Se solicitó GPU pero CUDA no está disponible; usando CPU.")
+            return "cpu"
+        return "cpu"
 
     @property
     def model_path(self) -> str:

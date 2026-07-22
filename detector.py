@@ -118,8 +118,14 @@ class VehicleDetector:
                         except OSError:
                             pass
                 self.model_size = config.settings.model_size
-                self.device = config.settings.device
-                print(f"[detector] Modelo {model_name} cargado en {self.device}.")
+                self.device = config.settings.resolved_device
+                # Mover el modelo al dispositivo resuelto (GPU si está disponible)
+                try:
+                    self.model.to(self.device)
+                except Exception:
+                    pass
+                dev_label = "GPU (CUDA)" if str(self.device).startswith("cuda") else "CPU"
+                print(f"[detector] Modelo {model_name} cargado en {self.device} [{dev_label}].")
             except Exception as exc:  # pragma: no cover
                 print(f"[detector] ERROR cargando el modelo: {exc}")
                 self.model = None
@@ -128,7 +134,7 @@ class VehicleDetector:
         """Recarga el modelo si cambió el tamaño o el dispositivo en settings."""
         if (self.model is None
                 or self.model_size != config.settings.model_size
-                or self.device != config.settings.device):
+                or self.device != config.settings.resolved_device):
             self._load_model()
 
     # ------------------------------------------------------------------
@@ -151,7 +157,7 @@ class VehicleDetector:
                     conf=config.settings.confidence,
                     iou=config.settings.iou,
                     classes=config.TARGET_CLASS_IDS,
-                    device=config.settings.device,
+                    device=config.settings.resolved_device,
                     verbose=False,
                 )[0]
             detections = sv.Detections.from_ultralytics(results)

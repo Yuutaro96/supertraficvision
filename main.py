@@ -308,12 +308,26 @@ def export_csv(camera_id: Optional[int] = None, line_id: Optional[int] = None,
 # ---------------------------------------------------------------------------
 # API Estado y configuración
 # ---------------------------------------------------------------------------
+def _gpu_info() -> dict:
+    """Información del dispositivo de cómputo (GPU/CPU)."""
+    info = {"device": config.settings.resolved_device, "cuda_available": False, "gpu_name": None}
+    try:
+        import torch
+        if torch.cuda.is_available():
+            info["cuda_available"] = True
+            info["gpu_name"] = torch.cuda.get_device_name(0)
+    except Exception:
+        pass
+    return info
+
+
 @app.get("/api/status")
 def get_status():
     return {
         "cameras": manager.statuses(),
         "settings": config.settings.to_dict(),
         "totals_today": database.totals_today(),
+        "compute": _gpu_info(),
     }
 
 
