@@ -17,6 +17,55 @@ import supervision as sv
 import config
 
 
+def _patch_torch_load_for_ultralytics():
+    """
+    Compatibilidad con PyTorch >= 2.6.
+
+    Desde PyTorch 2.6 el parámetro `weights_only` de `torch.load` pasó a ser
+    `True` por defecto, lo que impide cargar los pesos oficiales de YOLOv8
+    (lanzando "Weights only load failed ... Unsupported global").
+
+    Los pesos oficiales de Ultralytics provienen de una fuente de confianza,
+    por lo que aquí:
+      1) Registramos las clases de Ultralytics como "safe globals".
+      2) Forzamos weights_only=False como respaldo para la carga del modelo.
+    """
+    try:
+        import torch  # import diferido
+
+        # (1) Intentar registrar las clases de Ultralytics como seguras.
+        try:
+            from torch.serialization import add_safe_globals
+            safe = []
+            try:
+                from ultralytics.nn.tasks import DetectionModel
+                safe.append(DetectionModel)
+            except Exception:
+                pass
+            try:
+                import torch.nn as nn
+                safe.extend([nn.Sequential, nn.ModuleList, nn.Conv2d])
+            except Exception:
+                pass
+            if safe:
+                add_safe_globals(safe)
+        except Exception:
+            pass
+
+        # (2) Respaldo: envolver torch.load para forzar weights_only=False.
+        if not getattr(torch, "_aforo_load_patched", False):
+            _orig_load = torch.load
+
+            def _patched_load(*args, **kwargs):
+                kwargs.setdefault("weights_only", False)
+                return _orig_load(*args, **kwargs)
+
+            torch.load = _patched_load
+            torch._aforo_load_patched = True
+    except Exception as exc:  # pragma: no cover
+        print(f"[detector] Aviso: no se pudo aplicar el parche de torch.load: {exc}")
+
+
 class VehicleDetector:
     """Detector singleton basado en YOLOv8 + ByteTrack."""
 
@@ -46,6 +95,7 @@ class VehicleDetector:
     # ------------------------------------------------------------------
     def _load_model(self):
         """Carga (o recarga) YOLOv8 según config.settings, descargando si falta."""
+        _patch_torch_load_for_ultralytics()  # compatibilidad PyTorch >= 2.6
         from ultralytics import YOLO  # import diferido para acelerar arranque
 
         model_path = config.settings.model_path
