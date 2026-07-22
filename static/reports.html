@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aforo Vehicular · Reportes</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <nav class="navbar">
+    <span class="brand">🚦 Aforo Vehicular</span>
+    <a href="/">Dashboard</a>
+    <a href="/cameras">Cámaras</a>
+    <a href="/lines">Líneas</a>
+    <a href="/reports" class="active">Reportes</a>
+    <span class="spacer"></span>
+  </nav>
+
+  <div class="container">
+    <h1>Reportes y Exportación</h1>
+    <p class="subtitle">Filtra los cruces registrados, visualiza el histograma por hora y exporta a CSV.</p>
+
+    <div class="card">
+      <div class="form-row">
+        <div class="field">
+          <label>Cámara</label>
+          <select id="fCamera"><option value="">Todas</option></select>
+        </div>
+        <div class="field">
+          <label>Clase</label>
+          <select id="fClass"><option value="">Todas</option></select>
+        </div>
+        <div class="field">
+          <label>Desde</label>
+          <input type="datetime-local" id="fFrom">
+        </div>
+        <div class="field">
+          <label>Hasta</label>
+          <input type="datetime-local" id="fTo">
+        </div>
+        <button class="btn" id="applyFilter">Filtrar</button>
+        <button class="btn green" id="exportCsv">Exportar CSV</button>
+      </div>
+    </div>
+
+    <div class="grid mt" style="grid-template-columns: repeat(auto-fit, minmax(340px,1fr));">
+      <div class="card">
+        <h2>Cruces por hora</h2>
+        <canvas id="hourChart" class="chart"></canvas>
+      </div>
+      <div class="card">
+        <h2>Distribución por clase</h2>
+        <canvas id="classChart" class="chart"></canvas>
+      </div>
+    </div>
+
+    <h2 class="mt">Detalle de cruces (<span id="rowCount">0</span>)</h2>
+    <div class="card scroll-y">
+      <table>
+        <thead>
+          <tr><th>Fecha/Hora</th><th>Cámara</th><th>Línea</th><th>Movimiento</th><th>Clase</th><th>Dirección</th><th>Conteo</th></tr>
+        </thead>
+        <tbody id="reportTable"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/reports.js"></script>
+</body>
+</html>

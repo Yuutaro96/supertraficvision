@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aforo Vehicular · Dashboard</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <span class="brand">🚦 Aforo Vehicular</span>
+    <a href="/" class="active">Dashboard</a>
+    <a href="/cameras">Cámaras</a>
+    <a href="/lines">Líneas</a>
+    <a href="/reports">Reportes</a>
+    <span class="spacer"></span>
+    <span class="badge-conn" id="wsState"><span class="status-dot" id="wsDot"></span>Tiempo real</span>
+  </nav>
+
+  <div class="container">
+    <h1>Dashboard</h1>
+    <p class="subtitle">Vista en tiempo real de cámaras activas y conteos del día.</p>
+
+    <h2>Totales de hoy</h2>
+    <div class="grid grid-stats" id="totals"></div>
+
+    <h2 class="mt">Cámaras activas</h2>
+    <div class="grid grid-cams" id="cameras"></div>
+    <div id="noCams" class="card muted hidden">No hay cámaras activas. Ve a la sección <a href="/cameras">Cámaras</a> para agregar una.</div>
+
+    <h2 class="mt">Últimos cruces registrados</h2>
+    <div class="card scroll-y">
+      <table>
+        <thead>
+          <tr><th>Hora</th><th>Cámara</th><th>Línea</th><th>Movimiento</th><th>Clase</th><th>Dirección</th></tr>
+        </thead>
+        <tbody id="crossings"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

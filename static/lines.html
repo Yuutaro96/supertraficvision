@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aforo Vehicular · Líneas</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <span class="brand">🚦 Aforo Vehicular</span>
+    <a href="/">Dashboard</a>
+    <a href="/cameras">Cámaras</a>
+    <a href="/lines" class="active">Líneas</a>
+    <a href="/reports">Reportes</a>
+    <span class="spacer"></span>
+  </nav>
+
+  <div class="container">
+    <h1>Configuración de Líneas Virtuales</h1>
+    <p class="subtitle">Selecciona una cámara y haz clic sobre la imagen para definir el punto A y el punto B de la línea de conteo.</p>
+
+    <div class="form-row">
+      <div class="field">
+        <label>Cámara</label>
+        <select id="camSelect"></select>
+      </div>
+      <button class="btn" id="loadFrame">Cargar frame</button>
+      <span class="muted" id="hint">Haz clic para marcar el punto A, luego el punto B.</span>
+    </div>
+
+    <div class="grid" style="grid-template-columns: minmax(0,2fr) minmax(280px,1fr);">
+      <div class="card">
+        <div class="canvas-wrap">
+          <canvas id="lineCanvas" width="800" height="450"></canvas>
+        </div>
+        <div class="form-row mt">
+          <div class="field">
+            <label>Nombre de la línea</label>
+            <input id="lineName" placeholder="Ej. Carril Norte">
+          </div>
+          <div class="field">
+            <label>Movimiento / Dirección</label>
+            <select id="lineMovement"></select>
+          </div>
+          <button class="btn green" id="saveLine" disabled>Guardar línea</button>
+          <button class="btn gray" id="resetDraw">Reiniciar dibujo</button>
+        </div>
+        <p class="muted" id="coords" style="font-size:12px">Coordenadas: —</p>
+      </div>
+
+      <div class="card">
+        <h2>Líneas configuradas</h2>
+        <table>
+          <thead><tr><th>Nombre</th><th>Movimiento</th><th>Coords</th><th class="right">Acción</th></tr></thead>
+          <tbody id="lineTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/static/js/common.js"></script>
+  <script src="/static/js/lines.js"></script>
+</body>
+</html>
