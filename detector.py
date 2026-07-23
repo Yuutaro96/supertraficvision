@@ -156,7 +156,7 @@ class VehicleDetector:
                     frame,
                     conf=config.settings.confidence,
                     iou=config.settings.iou,
-                    classes=config.TARGET_CLASS_IDS,
+                    classes=config.settings.active_class_ids,
                     device=config.settings.resolved_device,
                     verbose=False,
                 )[0]

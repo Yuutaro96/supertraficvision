@@ -14,3 +14,4 @@ models/
 
 # Sistema
 .DS_Store
+.abacus.donotdelete

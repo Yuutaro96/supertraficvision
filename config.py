@@ -80,6 +80,24 @@ class Settings:
         # IOU threshold para NMS
         self.iou: float = 0.5
 
+        # --- Stream de video (independiente del procesamiento IA) ---
+        # FPS de visualización del stream web (no afecta la detección)
+        self.display_fps: int = 25
+        # Calidad JPEG del stream MJPEG (0-100)
+        self.stream_quality: int = 80
+        # Resolución máxima del stream web: "original", "720p", "480p", "360p"
+        self.stream_resolution: str = "original"
+        # Tiempo de reconexión de cámara en segundos
+        self.reconnect_delay: int = 5
+
+        # --- Base de datos ---
+        # Retención de datos en SQLite (días, 0 = infinito)
+        self.data_retention_days: int = 90
+
+        # --- Clases activas para detección (IDs COCO) ---
+        # 0=persona, 1=bicicleta, 2=auto, 3=moto, 5=bus, 7=camión
+        self.active_classes: list = [0, 1, 2, 3, 5, 7]
+
     @property
     def model_name(self) -> str:
         return f"yolov8{self.model_size}.pt"
@@ -113,6 +131,13 @@ class Settings:
     def model_path(self) -> str:
         return os.path.join(MODELS_DIR, self.model_name)
 
+    @property
+    def active_class_ids(self) -> list:
+        """IDs de clases activas que además existen en VEHICLE_CLASSES."""
+        valid = set(VEHICLE_CLASSES.keys())
+        ids = [int(c) for c in (self.active_classes or []) if int(c) in valid]
+        return ids or list(valid)
+
     def to_dict(self) -> dict:
         return {
             "confidence": self.confidence,
@@ -120,12 +145,25 @@ class Settings:
             "target_fps": self.target_fps,
             "device": self.device,
             "iou": self.iou,
+            "display_fps": self.display_fps,
+            "stream_quality": self.stream_quality,
+            "stream_resolution": self.stream_resolution,
+            "reconnect_delay": self.reconnect_delay,
+            "data_retention_days": self.data_retention_days,
+            "active_classes": list(self.active_classes),
         }
 
     def update(self, **kwargs):
         for key, value in kwargs.items():
-            if hasattr(self, key) and value is not None:
-                setattr(self, key, value)
+            if not hasattr(self, key) or value is None:
+                continue
+            if key == "active_classes":
+                # Normalizar a lista de enteros
+                try:
+                    value = [int(v) for v in value]
+                except Exception:
+                    continue
+            setattr(self, key, value)
 
 
 # Instancia singleton global

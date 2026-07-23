@@ -71,6 +71,12 @@ class SettingsIn(BaseModel):
     target_fps: Optional[int] = None
     device: Optional[str] = None
     iou: Optional[float] = None
+    display_fps: Optional[int] = None
+    stream_quality: Optional[int] = None
+    stream_resolution: Optional[str] = None
+    reconnect_delay: Optional[int] = None
+    data_retention_days: Optional[int] = None
+    active_classes: Optional[List[int]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +169,11 @@ def page_lines():
 @app.get("/reports", response_class=HTMLResponse)
 def page_reports():
     return _page("reports.html")
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def page_settings():
+    return _page("settings.html")
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +352,94 @@ def update_settings(s: SettingsIn):
     config.settings.update(**s.dict(exclude_none=True))
     database.save_settings(config.settings.to_dict())
     return config.settings.to_dict()
+
+
+@app.get("/api/settings/gpu-info")
+def gpu_info_endpoint():
+    """Información detallada del dispositivo de cómputo (GPU/CPU)."""
+    info = {
+        "device": config.settings.resolved_device,
+        "preference": config.settings.device,
+        "cuda_available": False,
+        "gpu_name": None,
+        "vram_total_mb": None,
+        "vram_free_mb": None,
+    }
+    try:
+        import torch
+        if torch.cuda.is_available():
+            info["cuda_available"] = True
+            info["gpu_name"] = torch.cuda.get_device_name(0)
+            try:
+                free, total = torch.cuda.mem_get_info(0)
+                info["vram_total_mb"] = round(total / (1024 * 1024))
+                info["vram_free_mb"] = round(free / (1024 * 1024))
+            except Exception:
+                props = torch.cuda.get_device_properties(0)
+                info["vram_total_mb"] = round(props.total_memory / (1024 * 1024))
+    except Exception:
+        pass
+    return info
+
+
+@app.get("/api/settings/db-stats")
+def db_stats_endpoint():
+    """Estadísticas de la base de datos + registros que se limpiarían."""
+    stats = database.db_stats()
+    days = config.settings.data_retention_days
+    stats["retention_days"] = days
+    stats["removable_records"] = database.count_old_records(days) if days and days > 0 else 0
+    return stats
+
+
+@app.post("/api/settings/clean-data")
+def clean_old_data():
+    """Elimina registros más antiguos que data_retention_days."""
+    days = config.settings.data_retention_days
+    if not days or days <= 0:
+        return {"removed": 0, "message": "Retención indefinida: no se eliminó nada."}
+    removed = database.clean_old_counts(days)
+    return {"removed": removed, "message": f"Se eliminaron {removed} registros con más de {days} días."}
+
+
+@app.post("/api/settings/test-model")
+def test_model():
+    """Prueba rápida de que el modelo YOLO carga correctamente."""
+    import numpy as np
+    try:
+        from detector import get_detector
+        det = get_detector()
+        det.ensure_model()
+        if det.model is None:
+            return {"ok": False, "message": "El modelo no se pudo cargar."}
+        frame = np.zeros((320, 320, 3), dtype=np.uint8)
+        det.detect(frame)
+        return {
+            "ok": True,
+            "message": "Modelo cargado y operativo.",
+            "model": config.settings.model_name,
+            "device": config.settings.resolved_device,
+        }
+    except Exception as exc:
+        return {"ok": False, "message": f"Error al probar el modelo: {exc}"}
+
+
+@app.post("/api/settings/reload-model")
+def reload_model():
+    """Fuerza la recarga del modelo YOLO (aplica cambios de tamaño/dispositivo)."""
+    try:
+        from detector import get_detector
+        det = get_detector()
+        det._load_model()
+        ok = det.model is not None
+        return {
+            "ok": ok,
+            "message": "Modelo recargado." if ok else "No se pudo recargar el modelo.",
+            "model": config.settings.model_name,
+            "device": config.settings.resolved_device,
+        }
+    except Exception as exc:
+        return {"ok": False, "message": f"Error al recargar: {exc}"}
 
 
 @app.get("/api/meta")

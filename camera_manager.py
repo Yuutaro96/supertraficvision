@@ -170,11 +170,13 @@ class CameraStream:
         return False
 
     def _run(self):
-        target_interval = 1.0 / max(1, config.settings.target_fps)
         last_time = time.time()
-        reconnect_delay = 2.0
 
         while not self._stop.is_set():
+            # FPS de procesamiento IA (leído en caliente para reflejar cambios)
+            target_interval = 1.0 / max(1, config.settings.target_fps)
+            reconnect_delay = max(1, config.settings.reconnect_delay)
+
             if self._cap is None or not self.connected:
                 if not self._open():
                     self.last_error = f"No se pudo conectar a {self.url}"
@@ -418,11 +420,38 @@ class CameraManager:
 manager = CameraManager()
 
 
+def _resize_for_stream(frame: np.ndarray) -> np.ndarray:
+    """Redimensiona el frame según config.settings.stream_resolution.
+
+    Solo afecta la visualización web; la detección siempre usa la resolución
+    original de la cámara.
+    """
+    target = (config.settings.stream_resolution or "original").lower()
+    heights = {"360p": 360, "480p": 480, "720p": 720}
+    if target not in heights:
+        return frame  # "original" o valor desconocido -> sin cambio
+    h, w = frame.shape[:2]
+    new_h = heights[target]
+    if h <= new_h:
+        return frame  # no ampliar si ya es más pequeño
+    new_w = int(round(w * (new_h / float(h))))
+    return cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+
 def mjpeg_generator(camera_id: int):
     """Generador de bytes MJPEG para el endpoint de streaming."""
     stream = manager.get(camera_id)
     boundary = b"--frame"
+    last_emit = 0.0
     while True:
+        # Limitar el FPS de visualización (independiente del FPS de IA)
+        display_fps = max(1, config.settings.display_fps)
+        min_interval = 1.0 / display_fps
+        now = time.time()
+        if now - last_emit < min_interval:
+            time.sleep(max(0.0, min_interval - (now - last_emit)))
+        last_emit = time.time()
+
         frame = None
         if stream is None:
             stream = manager.get(camera_id)
@@ -433,7 +462,11 @@ def mjpeg_generator(camera_id: int):
             frame = np.zeros((360, 640, 3), dtype=np.uint8)
             cv2.putText(frame, "Sin senal", (180, 190),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2, cv2.LINE_AA)
-        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+
+        # Redimensionar para la web y aplicar calidad JPEG configurable
+        frame = _resize_for_stream(frame)
+        quality = int(min(100, max(10, config.settings.stream_quality)))
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
         if not ok:
             continue
         yield (boundary + b"\r\n"

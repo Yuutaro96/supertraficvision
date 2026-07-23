@@ -85,14 +85,38 @@ def _load_settings() -> None:
     with _lock, _connect() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
     mapping = {r["key"]: r["value"] for r in rows}
-    if mapping:
-        config.settings.update(
-            confidence=float(mapping["confidence"]) if "confidence" in mapping else None,
-            model_size=mapping.get("model_size"),
-            target_fps=int(mapping["target_fps"]) if "target_fps" in mapping else None,
-            device=mapping.get("device"),
-            iou=float(mapping["iou"]) if "iou" in mapping else None,
-        )
+    if not mapping:
+        return
+
+    def _as_int(key):
+        return int(mapping[key]) if key in mapping and mapping[key] not in (None, "None", "") else None
+
+    def _as_float(key):
+        return float(mapping[key]) if key in mapping and mapping[key] not in (None, "None", "") else None
+
+    active_classes = None
+    if "active_classes" in mapping:
+        try:
+            import ast
+            parsed = ast.literal_eval(mapping["active_classes"])
+            if isinstance(parsed, (list, tuple)):
+                active_classes = [int(x) for x in parsed]
+        except Exception:
+            active_classes = None
+
+    config.settings.update(
+        confidence=_as_float("confidence"),
+        model_size=mapping.get("model_size"),
+        target_fps=_as_int("target_fps"),
+        device=mapping.get("device"),
+        iou=_as_float("iou"),
+        display_fps=_as_int("display_fps"),
+        stream_quality=_as_int("stream_quality"),
+        stream_resolution=mapping.get("stream_resolution"),
+        reconnect_delay=_as_int("reconnect_delay"),
+        data_retention_days=_as_int("data_retention_days"),
+        active_classes=active_classes,
+    )
 
 
 def save_settings(data: Dict[str, Any]) -> None:
@@ -312,3 +336,65 @@ def totals_today(camera_id: Optional[int] = None) -> Dict[str, int]:
 def counts_by_camera_class(camera_id: int) -> Dict[str, int]:
     """Totales del día por clase para una cámara concreta."""
     return totals_today(camera_id)
+
+
+# ---------------------------------------------------------------------------
+# Mantenimiento / estadísticas de la base de datos
+# ---------------------------------------------------------------------------
+def count_old_records(days: int) -> int:
+    """Cuántos registros de 'counts' son más antiguos que 'days' días."""
+    if not days or days <= 0:
+        return 0
+    from datetime import timedelta
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM counts WHERE timestamp < ?", (cutoff,)
+        ).fetchone()
+    return int(row["n"]) if row else 0
+
+
+def clean_old_counts(days: int) -> int:
+    """Elimina registros de 'counts' más antiguos que N días. Devuelve cuántos borró."""
+    if not days or days <= 0:
+        return 0
+    from datetime import timedelta
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    with _lock, _connect() as conn:
+        cur = conn.execute("DELETE FROM counts WHERE timestamp < ?", (cutoff,))
+        conn.commit()
+        try:
+            conn.execute("VACUUM;")
+        except Exception:
+            pass
+    return cur.rowcount
+
+
+def db_stats() -> Dict[str, Any]:
+    """Estadísticas generales de la base de datos para la página de configuración."""
+    import os as _os
+    with _lock, _connect() as conn:
+        total = conn.execute("SELECT COUNT(*) AS n FROM counts").fetchone()["n"]
+        oldest = conn.execute("SELECT MIN(timestamp) AS t FROM counts").fetchone()["t"]
+        newest = conn.execute("SELECT MAX(timestamp) AS t FROM counts").fetchone()["t"]
+        cameras = conn.execute("SELECT COUNT(*) AS n FROM cameras").fetchone()["n"]
+        lines = conn.execute("SELECT COUNT(*) AS n FROM lines").fetchone()["n"]
+
+    size_bytes = 0
+    try:
+        for suffix in ("", "-wal", "-shm"):
+            p = config.DB_PATH + suffix
+            if _os.path.exists(p):
+                size_bytes += _os.path.getsize(p)
+    except Exception:
+        pass
+
+    return {
+        "total_records": int(total or 0),
+        "oldest": oldest,
+        "newest": newest,
+        "cameras": int(cameras or 0),
+        "lines": int(lines or 0),
+        "size_bytes": size_bytes,
+        "size_mb": round(size_bytes / (1024 * 1024), 2),
+    }
