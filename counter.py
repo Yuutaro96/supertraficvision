@@ -17,7 +17,17 @@ import database
 
 
 class LineZoneWrapper:
-    """Envuelve un sv.LineZone junto con metadatos de la línea."""
+    """
+    Envuelve un sv.LineZone junto con metadatos de la línea.
+
+    Mejoras con Supervision v0.25+:
+    - triggering_anchors: usa BOTTOM_CENTER (punto inferior del bbox) para
+      detectar el cruce, que es más preciso para vehículos (el punto de
+      contacto con el suelo, no el centro de la caja).
+    - minimum_crossing_threshold: requiere que el objeto aparezca al menos
+      2 frames del otro lado de la línea antes de contar, evitando falsos
+      positivos por detecciones inestables.
+    """
 
     def __init__(self, line_row: Dict):
         self.id = line_row["id"]
@@ -27,7 +37,14 @@ class LineZoneWrapper:
         self.x2, self.y2 = line_row["x2"], line_row["y2"]
         start = sv.Point(self.x1, self.y1)
         end = sv.Point(self.x2, self.y2)
-        self.zone = sv.LineZone(start=start, end=end)
+        self.zone = sv.LineZone(
+            start=start,
+            end=end,
+            # BOTTOM_CENTER → punto inferior del bbox (contacto con el suelo)
+            triggering_anchors=[sv.Position.BOTTOM_CENTER],
+            # 2 frames consecutivos del otro lado → conteo más estable
+            minimum_crossing_threshold=2,
+        )
 
     def as_dict(self) -> Dict:
         return {

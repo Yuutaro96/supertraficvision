@@ -70,12 +70,60 @@ class CameraStream:
         self.tracker = self.detector.create_tracker()
         self.line_counter = LineCounter(self.id)
 
-        # Anotadores de supervision
-        self.box_annotator = sv.BoundingBoxAnnotator(thickness=2)
-        self.label_annotator = sv.LabelAnnotator(text_scale=0.5, text_thickness=1,
-                                                 text_padding=3)
+        # ---------------------------------------------------------------
+        # Anotadores de Supervision (v0.25+)
+        # ---------------------------------------------------------------
+        # Paleta de colores por clase (cada clase tiene un color distinto)
+        self._palette = sv.ColorPalette.from_hex([
+            "#E6194B",  # 0: persona   → rojo
+            "#3CB44B",  # 1: bicicleta → verde
+            "#4363D8",  # 2: auto      → azul
+            "#F58231",  # 3: moto      → naranja
+            "#911EB4",  # 4: (reserva)
+            "#42D4F4",  # 5: bus       → cian
+            "#F032E6",  # 6: (reserva)
+            "#BFEF45",  # 7: camión    → lima
+        ])
+
+        # Elipse debajo del vehículo (estilo profesional, evita saturar el frame)
+        self.ellipse_annotator = sv.EllipseAnnotator(
+            color=self._palette,
+            color_lookup=sv.ColorLookup.CLASS,
+            thickness=2,
+        )
+
+        # Etiqueta con clase + tracking_id + confianza
+        self.label_annotator = sv.LabelAnnotator(
+            color=self._palette,
+            color_lookup=sv.ColorLookup.CLASS,
+            text_scale=0.45,
+            text_thickness=1,
+            text_padding=4,
+            text_position=sv.Position.TOP_CENTER,
+        )
+
+        # Traza / trayectoria de cada vehículo (rastro de movimiento)
+        self.trace_annotator = sv.TraceAnnotator(
+            color=self._palette,
+            color_lookup=sv.ColorLookup.CLASS,
+            thickness=2,
+            trace_length=30,           # últimos 30 frames de trayectoria
+            position=sv.Position.BOTTOM_CENTER,
+        )
+
+        # Líneas virtuales con conteos IN/OUT, texto orientado a la línea
         self.line_annotator = sv.LineZoneAnnotator(
-            thickness=2, text_thickness=1, text_scale=0.6
+            thickness=3,
+            color=sv.Color.WHITE,
+            text_thickness=1,
+            text_scale=0.55,
+            text_padding=6,
+            custom_in_text="ENTRA",
+            custom_out_text="SALE",
+            text_orient_to_line=True,
+            display_in_count=True,
+            display_out_count=True,
+            display_text_box=True,
         )
 
     # ------------------------------------------------------------------
@@ -181,28 +229,41 @@ class CameraStream:
 
     # ------------------------------------------------------------------
     def _process(self, frame: np.ndarray) -> np.ndarray:
-        """Ejecuta detección, conteo y dibuja anotaciones sobre el frame."""
+        """
+        Ejecuta detección + tracking + conteo y dibuja anotaciones con
+        los anotadores modernos de Supervision (v0.25+):
+
+          1. EllipseAnnotator  → elipse de color por clase bajo cada objeto
+          2. TraceAnnotator    → trayectoria de movimiento de cada objeto
+          3. LabelAnnotator    → etiqueta clase + tracking_id + confianza
+          4. LineZoneAnnotator → línea virtual con ENTRA / SALE
+        """
         try:
             self.line_counter.reload_if_changed()
             detections = self.detector.detect(frame, self.tracker)
 
             annotated = frame.copy()
 
-            # Etiquetas: clase + id + confianza
-            labels = []
             if len(detections) > 0:
+                # --- Construir etiquetas (clase + id + confianza) ----------
+                labels = []
                 for i in range(len(detections)):
                     class_id = int(detections.class_id[i]) if detections.class_id is not None else -1
                     conf = float(detections.confidence[i]) if detections.confidence is not None else 0.0
-                    tid = ""
-                    if detections.tracker_id is not None:
-                        tid = f"#{int(detections.tracker_id[i])} "
-                    labels.append(f"{tid}{config.class_name(class_id)} {conf:.2f}")
+                    emoji = config.class_emoji(class_id)
+                    cname = config.class_name(class_id)
+                    tid = f"#{int(detections.tracker_id[i])} " if detections.tracker_id is not None else ""
+                    labels.append(f"{emoji} {tid}{cname} {conf:.0%}")
 
-                annotated = self.box_annotator.annotate(annotated, detections)
+                # --- Anotaciones visuales (orden importa: trazo → elipse → label)
+                # 1. Trayectoria de movimiento
+                annotated = self.trace_annotator.annotate(annotated, detections)
+                # 2. Elipse por clase (más elegante que bounding box lleno)
+                annotated = self.ellipse_annotator.annotate(annotated, detections)
+                # 3. Etiqueta
                 annotated = self.label_annotator.annotate(annotated, detections, labels)
 
-            # Conteo de líneas + eventos
+            # --- Conteo de líneas + emisión de eventos WebSocket ----------
             events = self.line_counter.update(detections)
             for ev in events:
                 ev["timestamp"] = datetime.now().isoformat()
@@ -212,16 +273,19 @@ class CameraStream:
                 except queue.Full:
                     pass
 
-            # Dibujar líneas virtuales con sus contadores
+            # --- Dibujar cada línea virtual con su anotador ---------------
             for wrapper in self.line_counter.lines:
                 try:
-                    annotated = self.line_annotator.annotate(annotated, line_counter=wrapper.zone)
+                    annotated = self.line_annotator.annotate(
+                        annotated, line_counter=wrapper.zone
+                    )
                 except Exception:
                     pass
 
-            # Overlay con nombre de cámara y FPS
+            # --- Overlay con nombre de cámara y FPS -----------------------
             self._draw_overlay(annotated)
             return annotated
+
         except Exception as exc:  # pragma: no cover
             print(f"[camera {self.id}] Error procesando frame: {exc}")
             self._draw_overlay(frame)

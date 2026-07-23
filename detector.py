@@ -173,8 +173,17 @@ class VehicleDetector:
 
     @staticmethod
     def create_tracker() -> sv.ByteTrack:
-        """Crea un tracker ByteTrack independiente por cámara."""
-        return sv.ByteTrack()
+        """
+        Crea un tracker ByteTrack independiente por cámara.
+
+        Nota: sv.ByteTrack está marcado como deprecated desde v0.28 pero
+        sigue funcional en v0.29. Se suprime el warning para no saturar los
+        logs; cuando se actualice a v0.30 se migrará a ByteTrackTracker.
+        """
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            return sv.ByteTrack()
 
 
 # Acceso conveniente
