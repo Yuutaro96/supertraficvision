@@ -172,3 +172,13 @@ settings = Settings()
 # Servidor
 HOST = "0.0.0.0"
 PORT = 8000
+
+# ---------------------------------------------------------------------------
+# Sincronización con servidor central (opcional)
+# ---------------------------------------------------------------------------
+# Si SYNC_SERVER_URL está vacío, la sincronización queda desactivada y la app
+# funciona exactamente igual que antes (solo local/LAN).
+SYNC_SERVER_URL = os.environ.get("SYNC_SERVER_URL", "").rstrip("/")
+SYNC_API_KEY = os.environ.get("SYNC_API_KEY", "")
+SYNC_SITE_ID = os.environ.get("SYNC_SITE_ID", "sitio-1")
+SYNC_INTERVAL_SECONDS = int(os.environ.get("SYNC_INTERVAL_SECONDS", "300"))

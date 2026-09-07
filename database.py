@@ -62,11 +62,13 @@ def init_db() -> None:
                 line_id     INTEGER NOT NULL,
                 class_name  TEXT NOT NULL,
                 direction   TEXT NOT NULL,
-                count       INTEGER NOT NULL DEFAULT 1
+                count       INTEGER NOT NULL DEFAULT 1,
+                synced      INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_counts_ts ON counts(timestamp);
             CREATE INDEX IF NOT EXISTS idx_counts_cam ON counts(camera_id);
+            CREATE INDEX IF NOT EXISTS idx_counts_synced ON counts(synced);
 
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
@@ -74,7 +76,11 @@ def init_db() -> None:
             );
             """
         )
-        conn.commit()
+        try:
+            conn.execute("ALTER TABLE counts ADD COLUMN synced INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
     _load_settings()
 
 
@@ -252,6 +258,31 @@ def record_count(camera_id: int, line_id: int, class_name: str,
             "VALUES(?, ?, ?, ?, ?, ?)",
             (ts, camera_id, line_id, class_name, direction, count),
         )
+        conn.commit()
+
+
+def get_unsynced_counts(limit: int = 500) -> List[Dict]:
+    """Cruces aún no enviados al servidor central, con datos de cámara/línea."""
+    q = """
+        SELECT c.*, cam.name AS camera_name, l.name AS line_name, l.movement AS movement
+        FROM counts c
+        LEFT JOIN cameras cam ON cam.id = c.camera_id
+        LEFT JOIN lines l ON l.id = c.line_id
+        WHERE c.synced = 0
+        ORDER BY c.id
+        LIMIT ?
+    """
+    with _lock, _connect() as conn:
+        rows = conn.execute(q, (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_synced(ids: List[int]) -> None:
+    if not ids:
+        return
+    placeholders = ",".join("?" * len(ids))
+    with _lock, _connect() as conn:
+        conn.execute(f"UPDATE counts SET synced = 1 WHERE id IN ({placeholders})", ids)
         conn.commit()
 
 

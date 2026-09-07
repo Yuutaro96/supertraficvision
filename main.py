@@ -29,6 +29,7 @@ from pydantic import BaseModel
 import config
 import database
 from camera_manager import manager, mjpeg_generator, EVENT_QUEUE
+from sync_client import sync_client
 
 
 # ---------------------------------------------------------------------------
@@ -133,10 +134,12 @@ async def event_pump():
 async def lifespan(app: FastAPI):
     database.init_db()
     manager.start_all()
+    sync_client.start()
     pump_task = asyncio.create_task(event_pump())
     print("[main] Aplicación iniciada.")
     yield
     pump_task.cancel()
+    sync_client.stop()
     manager.stop_all()
     print("[main] Aplicación detenida.")
 
