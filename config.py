@@ -75,6 +75,22 @@ class Settings:
         self.device: str = "auto"
         # IOU threshold para NMS
         self.iou: float = 0.5
+        # Resolución de inferencia de YOLO (más alto = mejor recall en
+        # vehículos lejanos/pequeños, a costa de FPS). Default de YOLO: 640.
+        self.imgsz: int = 640
+        # Umbrales de confianza por clase (id COCO -> confianza). Si una
+        # clase no está en el dict, se usa `confidence` (el umbral global).
+        self.class_confidence: dict = {}
+
+        # --- Tuning de ByteTrack (tracking) ---
+        # Confianza mínima para activar un track nuevo.
+        self.track_activation_threshold: float = 0.25
+        # Frames que un track puede pasar sin detección antes de perderse
+        # (más alto = tolera oclusiones breves sin fragmentar el track).
+        self.lost_track_buffer: int = 30
+        # Frames consecutivos requeridos antes de confirmar un track nuevo
+        # (más alto = menos IDs fantasma por detecciones inestables).
+        self.minimum_consecutive_frames: int = 1
 
         # --- Stream de video (independiente del procesamiento IA) ---
         # FPS de visualización del stream web (no afecta la detección)
@@ -141,6 +157,11 @@ class Settings:
             "target_fps": self.target_fps,
             "device": self.device,
             "iou": self.iou,
+            "imgsz": self.imgsz,
+            "class_confidence": dict(self.class_confidence),
+            "track_activation_threshold": self.track_activation_threshold,
+            "lost_track_buffer": self.lost_track_buffer,
+            "minimum_consecutive_frames": self.minimum_consecutive_frames,
             "display_fps": self.display_fps,
             "stream_quality": self.stream_quality,
             "stream_resolution": self.stream_resolution,
@@ -157,6 +178,13 @@ class Settings:
                 # Normalizar a lista de enteros
                 try:
                     value = [int(v) for v in value]
+                except Exception:
+                    continue
+            if key == "class_confidence":
+                # Normalizar claves (id de clase) y valores (confianza) a
+                # int/float; llega como dict con claves string desde JSON.
+                try:
+                    value = {int(k): float(v) for k, v in value.items()}
                 except Exception:
                     continue
             setattr(self, key, value)

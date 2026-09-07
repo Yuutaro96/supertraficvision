@@ -166,6 +166,16 @@ label.check input { min-width: auto; }
 .right { text-align: right; }
 .mt { margin-top: 16px; }
 .hidden { display: none !important; }
+.btn-group { display: flex; flex-wrap: wrap; gap: 8px; }
+.opt-btn {
+  background: rgba(255,255,255,.03);
+  border: 1px solid var(--border, #2a3345);
+  color: var(--text-muted, #8b98ad);
+  padding: 8px 14px; border-radius: 8px; cursor: pointer;
+  font-weight: 600; transition: all .15s;
+}
+.opt-btn:hover { color: #fff; border-color: #3b82f6; }
+.opt-btn.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
 .toast {
   position: fixed; bottom: 20px; right: 20px; background: var(--bg-card);
   border: 1px solid var(--border); border-left: 4px solid var(--green);

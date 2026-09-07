@@ -9,6 +9,10 @@ let imgW = 0, imgH = 0;   // dimensiones reales del frame
 let pointA = null, pointB = null; // en coordenadas de imagen
 let existingLines = [];
 
+let mode = "line";        // "line" | "roi"
+let existingRoi = [];     // puntos guardados en el servidor
+let roiPoints = [];       // puntos en edición (antes de guardar)
+
 function scaleFactors() {
   return { sx: canvas.width / imgW, sy: canvas.height / imgH };
 }
@@ -46,8 +50,46 @@ function redraw() {
     ctx.fillText(`${l.name} (${l.movement})`, a.x + 4, a.y - 6);
   });
 
+  // ROI guardado (naranja, semitransparente)
+  if (existingRoi.length >= 3) {
+    ctx.beginPath();
+    existingRoi.forEach((p, i) => {
+      const c = imageToCanvas(p[0], p[1]);
+      if (i === 0) ctx.moveTo(c.x, c.y); else ctx.lineTo(c.x, c.y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = "rgba(240,136,0,0.15)";
+    ctx.fill();
+    ctx.strokeStyle = "#f08800";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  // ROI en edición (amarillo)
+  if (roiPoints.length > 0) {
+    ctx.strokeStyle = "#e3b341";
+    ctx.fillStyle = "#e3b341";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    roiPoints.forEach((p, i) => {
+      const c = imageToCanvas(p[0], p[1]);
+      if (i === 0) ctx.moveTo(c.x, c.y); else ctx.lineTo(c.x, c.y);
+    });
+    if (roiPoints.length >= 3) {
+      const first = imageToCanvas(roiPoints[0][0], roiPoints[0][1]);
+      ctx.setLineDash([5, 5]);
+      ctx.lineTo(first.x, first.y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    roiPoints.forEach((p) => {
+      const c = imageToCanvas(p[0], p[1]);
+      ctx.beginPath(); ctx.arc(c.x, c.y, 4, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
   // Línea en edición (verde)
-  if (pointA) {
+  if (mode === "line" && pointA) {
     const a = imageToCanvas(pointA.x, pointA.y);
     ctx.fillStyle = "#3fb950";
     ctx.beginPath(); ctx.arc(a.x, a.y, 5, 0, Math.PI * 2); ctx.fill();
@@ -67,6 +109,14 @@ canvas.addEventListener("click", (e) => {
   const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
   const cy = (e.clientY - rect.top) * (canvas.height / rect.height);
   const p = canvasToImage(cx, cy);
+
+  if (mode === "roi") {
+    roiPoints.push([p.x, p.y]);
+    document.getElementById("saveRoi").disabled = roiPoints.length < 3;
+    redraw();
+    return;
+  }
+
   if (!pointA || (pointA && pointB)) {
     pointA = p; pointB = null;
   } else {
@@ -128,6 +178,50 @@ async function loadLines() {
   redraw();
 }
 
+async function loadRoi() {
+  if (!currentCam) return;
+  const r = await API.get(`/api/cameras/${currentCam}/roi`);
+  existingRoi = r.points || [];
+  roiPoints = [];
+  document.getElementById("saveRoi").disabled = true;
+  redraw();
+}
+
+async function saveRoi() {
+  if (!currentCam || roiPoints.length < 3) return;
+  try {
+    await API.put(`/api/cameras/${currentCam}/roi`, { points: roiPoints });
+    toast("ROI guardado");
+    await loadRoi();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function clearRoi() {
+  if (!currentCam) return;
+  if (!confirm("¿Borrar la zona de interés de esta cámara? Volverá a detectar en todo el frame.")) return;
+  try {
+    await API.del(`/api/cameras/${currentCam}/roi`);
+    toast("ROI eliminado");
+    await loadRoi();
+  } catch (e) { toast(e.message, true); }
+}
+
+function setMode(newMode) {
+  mode = newMode;
+  document.getElementById("modeGroup").querySelectorAll(".opt-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.mode === mode);
+  });
+  document.getElementById("lineForm").classList.toggle("hidden", mode !== "line");
+  document.getElementById("roiForm").classList.toggle("hidden", mode !== "roi");
+  document.getElementById("hint").textContent = mode === "roi"
+    ? "Haz clic para agregar cada punto del polígono ROI."
+    : "Haz clic para marcar el punto A, luego el punto B.";
+  pointA = pointB = null;
+  roiPoints = [];
+  updateCoords();
+  redraw();
+}
+
 function renderLineTable() {
   const tbody = document.getElementById("lineTable");
   if (existingLines.length === 0) {
@@ -173,9 +267,10 @@ async function delLine(id) {
 
 document.getElementById("camSelect").addEventListener("change", async (e) => {
   currentCam = parseInt(e.target.value);
-  frameImg = null; pointA = pointB = null;
+  frameImg = null; pointA = pointB = null; roiPoints = [];
   updateCoords();
   await loadLines();
+  await loadRoi();
 });
 document.getElementById("loadFrame").addEventListener("click", loadFrame);
 document.getElementById("saveLine").addEventListener("click", saveLine);
@@ -183,8 +278,20 @@ document.getElementById("resetDraw").addEventListener("click", () => {
   pointA = pointB = null; updateCoords(); redraw();
 });
 
+document.getElementById("modeGroup").querySelectorAll(".opt-btn").forEach((b) => {
+  b.addEventListener("click", () => setMode(b.dataset.mode));
+});
+document.getElementById("saveRoi").addEventListener("click", saveRoi);
+document.getElementById("clearRoi").addEventListener("click", clearRoi);
+document.getElementById("undoRoiPoint").addEventListener("click", () => {
+  roiPoints.pop();
+  document.getElementById("saveRoi").disabled = roiPoints.length < 3;
+  redraw();
+});
+
 (async function init() {
   await loadMovements();
   await loadCamsSelect();
+  await loadRoi();
   redraw();
 })();

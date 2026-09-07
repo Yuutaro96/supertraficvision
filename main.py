@@ -16,7 +16,7 @@ import io
 import csv
 import queue
 from contextlib import asynccontextmanager
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import cv2
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
@@ -86,12 +86,21 @@ class SettingsIn(BaseModel):
     target_fps: Optional[int] = None
     device: Optional[str] = None
     iou: Optional[float] = None
+    imgsz: Optional[int] = None
+    class_confidence: Optional[Dict[str, float]] = None
+    track_activation_threshold: Optional[float] = None
+    lost_track_buffer: Optional[int] = None
+    minimum_consecutive_frames: Optional[int] = None
     display_fps: Optional[int] = None
     stream_quality: Optional[int] = None
     stream_resolution: Optional[str] = None
     reconnect_delay: Optional[int] = None
     data_retention_days: Optional[int] = None
     active_classes: Optional[List[int]] = None
+
+
+class RoiIn(BaseModel):
+    points: List[List[int]] = []
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +266,36 @@ def delete_camera(camera_id: int):
     ok = database.delete_camera(camera_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# API ROI (zona de interés) por cámara
+# ---------------------------------------------------------------------------
+@app.get("/api/cameras/{camera_id}/roi")
+def get_camera_roi(camera_id: int):
+    if not database.get_camera(camera_id):
+        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    return {"points": database.get_roi(camera_id)}
+
+
+@app.put("/api/cameras/{camera_id}/roi")
+def set_camera_roi(camera_id: int, roi: RoiIn):
+    if not database.get_camera(camera_id):
+        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    if roi.points and len(roi.points) < 3:
+        raise HTTPException(status_code=400, detail="Un ROI necesita al menos 3 puntos")
+    database.set_roi(camera_id, roi.points)
+    manager.reload_roi(camera_id)
+    return {"points": roi.points}
+
+
+@app.delete("/api/cameras/{camera_id}/roi")
+def delete_camera_roi(camera_id: int):
+    if not database.get_camera(camera_id):
+        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    database.set_roi(camera_id, [])
+    manager.reload_roi(camera_id)
     return {"ok": True}
 
 

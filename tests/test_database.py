@@ -42,6 +42,18 @@ def test_unsynced_counts_roundtrip(temp_db):
     assert pending_after[0]["id"] == pending[1]["id"]
 
 
+def test_roi_roundtrip(temp_db):
+    cam = database.create_camera("Cam 1", "rtsp://x")
+    assert database.get_roi(cam["id"]) == []
+
+    points = [[10, 10], [50, 10], [50, 50]]
+    database.set_roi(cam["id"], points)
+    assert database.get_roi(cam["id"]) == points
+
+    database.set_roi(cam["id"], [])
+    assert database.get_roi(cam["id"]) == []
+
+
 def test_settings_persist_roundtrip(temp_db):
     database.save_settings({"confidence": 0.7, "model_size": "s"})
     database._load_settings()

@@ -48,7 +48,7 @@
   background: rgba(255,255,255,.02);
 }
 .model-card:hover { border-color: #3b82f6; transform: translateY(-2px); }
-.model-card.selected {
+.model-card.active {
   border-color: #3b82f6;
   background: rgba(59,130,246,.14);
   box-shadow: 0 0 0 1px #3b82f6 inset;
@@ -84,7 +84,7 @@
   font-weight: 600; transition: all .15s;
 }
 .opt-btn:hover { color: #fff; border-color: #3b82f6; }
-.opt-btn.selected {
+.opt-btn.active {
   background: #3b82f6; color: #fff; border-color: #3b82f6;
 }
 .opt-block { margin-top: 16px; }

@@ -27,6 +27,13 @@
         <select id="camSelect"></select>
       </div>
       <button class="btn" id="loadFrame">Cargar frame</button>
+      <div class="field">
+        <label>Modo</label>
+        <div class="btn-group" id="modeGroup">
+          <button class="opt-btn active" data-mode="line">📏 Líneas</button>
+          <button class="opt-btn" data-mode="roi">🔲 Zona de interés (ROI)</button>
+        </div>
+      </div>
       <span class="muted" id="hint">Haz clic para marcar el punto A, luego el punto B.</span>
     </div>
 
@@ -35,7 +42,7 @@
         <div class="canvas-wrap">
           <canvas id="lineCanvas" width="800" height="450"></canvas>
         </div>
-        <div class="form-row mt">
+        <div class="form-row mt" id="lineForm">
           <div class="field">
             <label>Nombre de la línea</label>
             <input id="lineName" placeholder="Ej. Carril Norte">
@@ -46,6 +53,12 @@
           </div>
           <button class="btn green" id="saveLine" disabled>Guardar línea</button>
           <button class="btn gray" id="resetDraw">Reiniciar dibujo</button>
+        </div>
+        <div class="form-row mt hidden" id="roiForm">
+          <p class="muted small" style="margin:0 0 8px">Haz clic para agregar puntos del polígono (mínimo 3). La detección solo se ejecutará dentro de esta zona.</p>
+          <button class="btn green" id="saveRoi" disabled>Guardar ROI</button>
+          <button class="btn gray" id="undoRoiPoint">Deshacer último punto</button>
+          <button class="btn red" id="clearRoi">Borrar ROI</button>
         </div>
         <p class="muted" id="coords" style="font-size:12px">Coordenadas: —</p>
       </div>

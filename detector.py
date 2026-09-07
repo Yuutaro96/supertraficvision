@@ -150,20 +150,31 @@ class VehicleDetector:
         if self.model is None:
             return sv.Detections.empty()
 
+        class_confidence = config.settings.class_confidence
+        # Umbral usado en la inferencia: el más bajo entre el global y los
+        # overrides por clase, para no descartar antes de tiempo detecciones
+        # de una clase con umbral más permisivo (se filtran después, por clase).
+        base_conf = min([config.settings.confidence, *class_confidence.values()]) \
+            if class_confidence else config.settings.confidence
+
         try:
             with self._model_lock:
                 results = self.model(
                     frame,
-                    conf=config.settings.confidence,
+                    conf=base_conf,
                     iou=config.settings.iou,
                     classes=config.settings.active_class_ids,
                     device=config.settings.resolved_device,
+                    imgsz=config.settings.imgsz,
+                    half=str(self.device).startswith("cuda"),
                     verbose=False,
                 )[0]
             detections = sv.Detections.from_ultralytics(results)
         except Exception as exc:  # pragma: no cover
             print(f"[detector] Error en detección: {exc}")
             return sv.Detections.empty()
+
+        detections = _filter_by_class_confidence(detections, class_confidence, config.settings.confidence)
 
         # Tracking para evitar doble conteo
         if tracker is not None and len(detections) > 0:
@@ -174,16 +185,37 @@ class VehicleDetector:
     @staticmethod
     def create_tracker() -> sv.ByteTrack:
         """
-        Crea un tracker ByteTrack independiente por cámara.
+        Crea un tracker ByteTrack independiente por cámara, con los
+        parámetros configurables en Ajustes (activación, buffer de tracks
+        perdidos, frames consecutivos mínimos).
 
         Nota: sv.ByteTrack está marcado como deprecated desde v0.28 pero
-        sigue funcional en v0.29. Se suprime el warning para no saturar los
-        logs; cuando se actualice a v0.30 se migrará a ByteTrackTracker.
+        sigue funcional. Se suprime el warning para no saturar los logs.
         """
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", FutureWarning)
-            return sv.ByteTrack()
+            return sv.ByteTrack(
+                track_activation_threshold=config.settings.track_activation_threshold,
+                lost_track_buffer=config.settings.lost_track_buffer,
+                minimum_consecutive_frames=config.settings.minimum_consecutive_frames,
+            )
+
+
+def _filter_by_class_confidence(detections: sv.Detections, class_confidence: dict,
+                                default_confidence: float) -> sv.Detections:
+    """Aplica umbrales de confianza distintos por clase, post-inferencia.
+
+    La inferencia ya corrió con el umbral más bajo necesario; aquí se
+    descartan las detecciones que no alcancen el umbral de SU clase.
+    """
+    if not class_confidence or len(detections) == 0 or detections.confidence is None:
+        return detections
+    thresholds = np.array([
+        class_confidence.get(int(cid), default_confidence) for cid in detections.class_id
+    ])
+    keep = detections.confidence >= thresholds
+    return detections[keep]
 
 
 # Acceso conveniente
