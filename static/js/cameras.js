@@ -23,8 +23,8 @@ async function loadCameras() {
       : `<span class="muted">—</span>`;
     return `<tr>
       <td>${c.id}</td>
-      <td>${c.name}</td>
-      <td class="muted" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.url}</td>
+      <td>${escapeHtml(c.name)}</td>
+      <td class="muted" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(c.url)}</td>
       <td><span class="tag ${c.active ? "in" : "out"}">${c.active ? "Activa" : "Inactiva"}</span></td>
       <td>${connBadge}</td>
       <td>${st ? st.fps : 0}</td>

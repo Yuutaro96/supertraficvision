@@ -65,9 +65,22 @@ class LineCounter:
         self.load_lines()
 
     def load_lines(self):
-        """(Re)carga las líneas de la cámara desde la base de datos."""
+        """(Re)carga las líneas de la cámara desde la base de datos.
+
+        Conserva el wrapper (y por lo tanto los contadores IN/OUT en memoria)
+        de las líneas que no cambiaron, para que editar o agregar una línea
+        no resetee el conteo en vivo de las demás líneas de la cámara.
+        """
         rows = database.get_lines(self.camera_id)
-        self.lines = [LineZoneWrapper(r) for r in rows]
+        existing = {w.id: w for w in self.lines}
+        new_lines = []
+        for r in rows:
+            w = existing.get(r["id"])
+            unchanged = w is not None and (
+                w.name, w.movement, w.x1, w.y1, w.x2, w.y2
+            ) == (r["name"], r["movement"], r["x1"], r["y1"], r["x2"], r["y2"])
+            new_lines.append(w if unchanged else LineZoneWrapper(r))
+        self.lines = new_lines
 
     def reload_if_changed(self):
         """Recarga si el número de líneas en DB difiere del actual."""

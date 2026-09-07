@@ -94,7 +94,7 @@ function updateCoords() {
 async function loadCamsSelect() {
   const cams = await API.get("/api/cameras");
   const sel = document.getElementById("camSelect");
-  sel.innerHTML = cams.map((c) => `<option value="${c.id}">${c.name} (#${c.id})</option>`).join("");
+  sel.innerHTML = cams.map((c) => `<option value="${c.id}">${escapeHtml(c.name)} (#${c.id})</option>`).join("");
   if (cams.length) { currentCam = parseInt(sel.value); await loadLines(); }
 }
 
@@ -136,8 +136,8 @@ function renderLineTable() {
   }
   tbody.innerHTML = existingLines.map((l) =>
     `<tr>
-      <td>${l.name}</td>
-      <td>${l.movement}</td>
+      <td>${escapeHtml(l.name)}</td>
+      <td>${escapeHtml(l.movement)}</td>
       <td class="muted">${l.x1},${l.y1} → ${l.x2},${l.y2}</td>
       <td class="right"><button class="btn sm red" onclick="delLine(${l.id})">Eliminar</button></td>
     </tr>`

@@ -31,10 +31,6 @@ VEHICLE_CLASSES = {
     7: {"name": "Camión", "emoji": "🚚", "color": (183, 112, 255)},
 }
 
-# Lista de ids que se pasan a YOLO para filtrar (class_agnostic=False)
-TARGET_CLASS_IDS = list(VEHICLE_CLASSES.keys())
-
-
 def class_name(class_id: int) -> str:
     """Devuelve el nombre en español de una clase COCO."""
     info = VEHICLE_CLASSES.get(int(class_id))

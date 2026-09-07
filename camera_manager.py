@@ -64,6 +64,7 @@ class CameraStream:
         self.last_error = ""
         self.fps = 0.0
         self.frame_count = 0
+        self._reconnect_attempts = 0
 
         # Componentes de detección/conteo
         self.detector = get_detector()
@@ -149,6 +150,13 @@ class CameraStream:
     def reload_lines(self):
         self.line_counter.load_lines()
 
+    def _next_backoff(self) -> float:
+        """Backoff exponencial (con techo) para reintentos de conexión."""
+        base = max(1, config.settings.reconnect_delay)
+        delay = min(base * (2 ** self._reconnect_attempts), 60)
+        self._reconnect_attempts += 1
+        return delay
+
     # ------------------------------------------------------------------
     def _open(self) -> bool:
         try:
@@ -175,13 +183,12 @@ class CameraStream:
         while not self._stop.is_set():
             # FPS de procesamiento IA (leído en caliente para reflejar cambios)
             target_interval = 1.0 / max(1, config.settings.target_fps)
-            reconnect_delay = max(1, config.settings.reconnect_delay)
 
             if self._cap is None or not self.connected:
                 if not self._open():
                     self.last_error = f"No se pudo conectar a {self.url}"
                     self._publish_placeholder("Conectando...")
-                    time.sleep(reconnect_delay)
+                    time.sleep(self._next_backoff())
                     continue
 
             ok, frame = self._cap.read()
@@ -194,12 +201,15 @@ class CameraStream:
                 except Exception:
                     pass
                 self._cap = None
-                # Si es archivo de video, reiniciar al inicio
+                # Si es archivo de video, reiniciar al inicio (no es una
+                # falla de conexión real, no aplica backoff)
                 if isinstance(self.source, str) and os.path.isfile(self.source):
                     time.sleep(0.5)
                 else:
-                    time.sleep(reconnect_delay)
+                    time.sleep(self._next_backoff())
                 continue
+
+            self._reconnect_attempts = 0
 
             # Control de FPS objetivo
             now = time.time()

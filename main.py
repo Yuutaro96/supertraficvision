@@ -24,7 +24,7 @@ from fastapi.responses import (
     StreamingResponse, HTMLResponse, JSONResponse, Response, FileResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 import config
 import database
@@ -56,6 +56,13 @@ class LineIn(BaseModel):
     y2: int
     movement: str = "RECTO"
 
+    @field_validator("movement")
+    @classmethod
+    def _validate_movement(cls, v):
+        if v not in config.MOVEMENT_LABELS:
+            raise ValueError(f"movement debe ser uno de: {', '.join(config.MOVEMENT_LABELS)}")
+        return v
+
 
 class LineUpdate(BaseModel):
     name: Optional[str] = None
@@ -64,6 +71,13 @@ class LineUpdate(BaseModel):
     x2: Optional[int] = None
     y2: Optional[int] = None
     movement: Optional[str] = None
+
+    @field_validator("movement")
+    @classmethod
+    def _validate_movement(cls, v):
+        if v is not None and v not in config.MOVEMENT_LABELS:
+            raise ValueError(f"movement debe ser uno de: {', '.join(config.MOVEMENT_LABELS)}")
+        return v
 
 
 class SettingsIn(BaseModel):
@@ -219,13 +233,21 @@ def create_camera(cam: CameraIn):
 
 @app.put("/api/cameras/{camera_id}")
 def update_camera(camera_id: int, cam: CameraUpdate):
-    updated = database.update_camera(camera_id, cam.name, cam.url, cam.active)
-    if not updated:
+    before = database.get_camera(camera_id)
+    if not before:
         raise HTTPException(status_code=404, detail="Cámara no encontrada")
-    # Reiniciar el stream para aplicar cambios
-    manager.stop_camera(camera_id)
-    if updated["active"]:
-        manager.start_camera(updated)
+    updated = database.update_camera(camera_id, cam.name, cam.url, cam.active)
+
+    # Solo reiniciar el stream si cambió la URL o el estado activo/inactivo;
+    # un cambio de nombre no requiere cortar el video en curso.
+    needs_restart = (
+        (cam.url is not None and cam.url != before["url"])
+        or (cam.active is not None and cam.active != bool(before["active"]))
+    )
+    if needs_restart:
+        manager.stop_camera(camera_id)
+        if updated["active"]:
+            manager.start_camera(updated)
     return updated
 
 

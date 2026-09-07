@@ -19,7 +19,7 @@ async function loadFilters() {
   const [cams] = await Promise.all([API.get("/api/cameras"), loadMeta()]);
   const camSel = document.getElementById("fCamera");
   camSel.innerHTML = `<option value="">Todas</option>` +
-    cams.map((c) => `<option value="${c.id}">${c.name}</option>`).join("");
+    cams.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
   const clsSel = document.getElementById("fClass");
   clsSel.innerHTML = `<option value="">Todas</option>` +
     META.classes.map((c) => `<option value="${c.name}">${c.emoji} ${c.name}</option>`).join("");
@@ -37,11 +37,11 @@ async function loadReport() {
     tbody.innerHTML = rows.map((r) =>
       `<tr>
         <td>${fmtTime(r.timestamp)}</td>
-        <td>${r.camera_name || r.camera_id}</td>
-        <td>${r.line_name || ""}</td>
-        <td>${r.movement || ""}</td>
-        <td>${classEmoji(r.class_name)} ${r.class_name}</td>
-        <td><span class="tag ${r.direction === "IN" ? "in" : "out"}">${r.direction}</span></td>
+        <td>${escapeHtml(r.camera_name || r.camera_id)}</td>
+        <td>${escapeHtml(r.line_name || "")}</td>
+        <td>${escapeHtml(r.movement || "")}</td>
+        <td>${classEmoji(r.class_name)} ${escapeHtml(r.class_name)}</td>
+        <td><span class="tag ${r.direction === "IN" ? "in" : "out"}">${escapeHtml(r.direction)}</span></td>
         <td>${r.count}</td>
       </tr>`
     ).join("");

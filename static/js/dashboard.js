@@ -24,17 +24,18 @@ async function renderTotals() {
 function cameraTile(cam) {
   const connClass = cam.connected ? "on" : "off";
   const connText = cam.connected ? "Conectada" : "Desconectada";
+  const name = escapeHtml(cam.name);
   const chips = (cam.lines || []).map((l) =>
-    `<span class="chip">${l.name}: <b>IN ${l.in_count}</b> / OUT ${l.out_count}</span>`
+    `<span class="chip">${escapeHtml(l.name)}: <b>IN ${l.in_count}</b> / OUT ${l.out_count}</span>`
   ).join("");
   return `<div class="card cam-tile" data-cam="${cam.id}">
     <div class="cam-head">
-      <span class="cam-name">${cam.name}</span>
+      <span class="cam-name">${name}</span>
       <span class="badge-conn ${connClass}">
         <span class="status-dot ${cam.connected ? "on" : ""}"></span>${connText} · ${cam.fps} FPS
       </span>
     </div>
-    <img class="cam-video" src="/stream/${cam.id}" alt="${cam.name}"
+    <img class="cam-video" src="/stream/${cam.id}" alt="${name}"
          onerror="this.style.opacity=0.3">
     <div class="cam-counters">${chips || '<span class="muted">Sin líneas configuradas</span>'}</div>
   </div>`;
@@ -66,7 +67,7 @@ async function renderCameras(status) {
       badge.innerHTML = `<span class="status-dot ${cam.connected ? "on" : ""}"></span>${cam.connected ? "Conectada" : "Desconectada"} · ${cam.fps} FPS`;
       const counters = tile.querySelector(".cam-counters");
       counters.innerHTML = (cam.lines || []).map((l) =>
-        `<span class="chip">${l.name}: <b>IN ${l.in_count}</b> / OUT ${l.out_count}</span>`
+        `<span class="chip">${escapeHtml(l.name)}: <b>IN ${l.in_count}</b> / OUT ${l.out_count}</span>`
       ).join("") || '<span class="muted">Sin líneas configuradas</span>';
     });
   }
@@ -77,11 +78,11 @@ function renderCrossings() {
   tbody.innerHTML = crossings.slice(0, 50).map((c) =>
     `<tr>
       <td>${fmtTimeShort(c.timestamp)}</td>
-      <td>${c.camera_name || c.camera_id}</td>
-      <td>${c.line_name || ""}</td>
-      <td>${c.movement || ""}</td>
-      <td>${c.emoji || ""} ${c.class_name}</td>
-      <td><span class="tag ${c.direction === "IN" ? "in" : "out"}">${c.direction}</span></td>
+      <td>${escapeHtml(c.camera_name || c.camera_id)}</td>
+      <td>${escapeHtml(c.line_name || "")}</td>
+      <td>${escapeHtml(c.movement || "")}</td>
+      <td>${c.emoji || ""} ${escapeHtml(c.class_name)}</td>
+      <td><span class="tag ${c.direction === "IN" ? "in" : "out"}">${escapeHtml(c.direction)}</span></td>
     </tr>`
   ).join("");
 }
