@@ -87,6 +87,7 @@ class VehicleDetector:
         self.model = None
         self.model_size = None
         self.device = None
+        self.using_openvino = False
         self._model_lock = threading.Lock()
         self._load_model()
 
@@ -104,37 +105,77 @@ class VehicleDetector:
         # Si el peso no está en models/, YOLO lo descarga automáticamente al
         # instanciarse con el nombre. Lo movemos luego a models/ para reuso.
         with self._model_lock:
+            self.using_openvino = False
             try:
                 if os.path.exists(model_path):
-                    self.model = YOLO(model_path)
+                    base_model = YOLO(model_path)
                 else:
                     # YOLO descarga el peso oficial al directorio actual
-                    self.model = YOLO(model_name)
+                    base_model = YOLO(model_name)
                     # Intentar reubicar el archivo descargado a models/
                     if os.path.exists(model_name):
                         try:
                             os.replace(model_name, model_path)
-                            self.model = YOLO(model_path)
+                            base_model = YOLO(model_path)
                         except OSError:
                             pass
+
+                self.model = base_model
+                if config.settings.use_openvino:
+                    try:
+                        self.model = self._load_openvino(base_model, model_path)
+                        self.using_openvino = True
+                    except Exception as exc:
+                        print(f"[detector] OpenVINO no disponible ({exc}); usando PyTorch en CPU.")
+                        self.model = base_model
+
                 self.model_size = config.settings.model_size
                 self.device = config.settings.resolved_device
-                # Mover el modelo al dispositivo resuelto (GPU si está disponible)
-                try:
-                    self.model.to(self.device)
-                except Exception:
-                    pass
-                dev_label = "GPU (CUDA)" if str(self.device).startswith("cuda") else "CPU"
+                if not self.using_openvino:
+                    # Mover el modelo al dispositivo resuelto (GPU si está disponible)
+                    try:
+                        self.model.to(self.device)
+                    except Exception:
+                        pass
+
+                if self.using_openvino:
+                    dev_label = "OpenVINO (Intel CPU/iGPU)"
+                elif str(self.device).startswith("cuda"):
+                    dev_label = "GPU (CUDA)"
+                else:
+                    dev_label = "CPU"
                 print(f"[detector] Modelo {model_name} cargado en {self.device} [{dev_label}].")
             except Exception as exc:  # pragma: no cover
                 print(f"[detector] ERROR cargando el modelo: {exc}")
                 self.model = None
 
+    def _load_openvino(self, base_model, model_path: str):
+        """Exporta (una sola vez, se reutiliza después) y carga la versión
+        OpenVINO del modelo, más rápida en CPU/iGPU Intel que PyTorch plano.
+        Si algo falla (paquete no instalado, export falla, etc.) la
+        excepción se propaga y _load_model() cae de vuelta a PyTorch normal.
+        """
+        from ultralytics import YOLO
+
+        ov_dir = model_path.rsplit(".", 1)[0] + "_openvino_model"
+        if not os.path.isdir(ov_dir):
+            exported = base_model.export(format="openvino", dynamic=True, imgsz=config.settings.imgsz)
+            exported_dir = str(exported)
+            if os.path.isdir(exported_dir) and os.path.abspath(exported_dir) != os.path.abspath(ov_dir):
+                if os.path.isdir(ov_dir):
+                    import shutil
+                    shutil.rmtree(ov_dir)
+                os.replace(exported_dir, ov_dir)
+        return YOLO(ov_dir)
+
     def ensure_model(self):
-        """Recarga el modelo si cambió el tamaño o el dispositivo en settings."""
+        """Recarga el modelo si cambió el tamaño, el dispositivo o la
+        preferencia de OpenVINO en settings (resolved_device no cambia
+        entre "cpu" normal y "cpu vía OpenVINO", por eso el chequeo aparte)."""
         if (self.model is None
                 or self.model_size != config.settings.model_size
-                or self.device != config.settings.resolved_device):
+                or self.device != config.settings.resolved_device
+                or self.using_openvino != config.settings.use_openvino):
             self._load_model()
 
     # ------------------------------------------------------------------

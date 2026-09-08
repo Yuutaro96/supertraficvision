@@ -36,6 +36,15 @@ def test_filter_by_class_confidence_noop_without_overrides():
     assert len(filtered) == 2  # sin overrides, no filtra nada aquí (ya filtró YOLO)
 
 
+def test_use_openvino_flag(monkeypatch):
+    monkeypatch.setattr(config.settings, "device", "cpu")
+    assert config.settings.use_openvino is False
+
+    monkeypatch.setattr(config.settings, "device", "openvino")
+    assert config.settings.use_openvino is True
+    assert config.settings.resolved_device == "cpu"  # sigue siendo "cpu" para torch/device=
+
+
 def test_create_tracker_uses_configured_params(monkeypatch):
     monkeypatch.setattr(config.settings, "track_activation_threshold", 0.4)
     monkeypatch.setattr(config.settings, "lost_track_buffer", 45)

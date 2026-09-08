@@ -122,6 +122,7 @@ class Settings:
         - "auto"  -> "cuda" si hay GPU NVIDIA disponible, si no "cpu".
         - "cuda"/"gpu" -> "cuda" si está disponible, si no "cpu" (con aviso).
         - "cpu"   -> "cpu".
+        - "openvino" -> "cpu" (el backend real lo decide use_openvino/detector.py).
         """
         pref = (self.device or "auto").lower()
         try:
@@ -138,6 +139,13 @@ class Settings:
             print("[config] Se solicitó GPU pero CUDA no está disponible; usando CPU.")
             return "cpu"
         return "cpu"
+
+    @property
+    def use_openvino(self) -> bool:
+        """True si el usuario eligió acelerar la inferencia con OpenVINO
+        (Intel CPU/iGPU). Si la exportación/carga falla, detector.py cae
+        de vuelta al modelo PyTorch normal en CPU."""
+        return (self.device or "").lower() in ("openvino", "intel")
 
     @property
     def model_path(self) -> str:

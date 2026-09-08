@@ -268,6 +268,14 @@ async function loadGpuInfo() {
 
 function updateDeviceBadge() {
   const badge = $("deviceBadge");
+  const activeBtn = $("deviceGroup").querySelector(".opt-btn.active");
+  const selected = activeBtn ? activeBtn.dataset.device : CFG.device;
+
+  if (selected === "openvino") {
+    badge.textContent = "🧠 OpenVINO seleccionado — se activa al guardar (la primera vez tarda unos segundos en exportar el modelo).";
+    badge.className = "device-badge ok";
+    return;
+  }
   if (!_gpu) { badge.textContent = "No se pudo comprobar el dispositivo."; badge.className = "device-badge"; return; }
   if (_gpu.cuda_available) {
     let txt = "✅ GPU activa: " + (_gpu.gpu_name || "NVIDIA CUDA");
@@ -275,7 +283,7 @@ function updateDeviceBadge() {
     badge.textContent = txt;
     badge.className = "device-badge ok";
   } else {
-    badge.textContent = "⚠️ GPU no disponible, usando CPU. Para usar GPU instala PyTorch con CUDA.";
+    badge.textContent = "⚠️ GPU no disponible, usando CPU. Para usar GPU instala PyTorch con CUDA, o prueba OpenVINO si tienes CPU/gráficos Intel.";
     badge.className = "device-badge warn";
   }
 }
