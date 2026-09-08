@@ -1,5 +1,11 @@
 /* common.js - utilidades compartidas por todas las páginas */
 
+const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+function escapeHtml(value) {
+  if (value == null) return "";
+  return String(value).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+}
+
 const API = {
   async get(url) {
     const r = await fetch(url);

@@ -39,7 +39,8 @@ def init_db() -> None:
                 name        TEXT NOT NULL,
                 url         TEXT NOT NULL,
                 active      INTEGER NOT NULL DEFAULT 1,
-                created_at  TEXT NOT NULL
+                created_at  TEXT NOT NULL,
+                roi_points  TEXT
             );
 
             CREATE TABLE IF NOT EXISTS lines (
@@ -62,11 +63,13 @@ def init_db() -> None:
                 line_id     INTEGER NOT NULL,
                 class_name  TEXT NOT NULL,
                 direction   TEXT NOT NULL,
-                count       INTEGER NOT NULL DEFAULT 1
+                count       INTEGER NOT NULL DEFAULT 1,
+                synced      INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_counts_ts ON counts(timestamp);
             CREATE INDEX IF NOT EXISTS idx_counts_cam ON counts(camera_id);
+            CREATE INDEX IF NOT EXISTS idx_counts_synced ON counts(synced);
 
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
@@ -74,7 +77,16 @@ def init_db() -> None:
             );
             """
         )
-        conn.commit()
+        try:
+            conn.execute("ALTER TABLE counts ADD COLUMN synced INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE cameras ADD COLUMN roi_points TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
     _load_settings()
 
 
@@ -94,15 +106,25 @@ def _load_settings() -> None:
     def _as_float(key):
         return float(mapping[key]) if key in mapping and mapping[key] not in (None, "None", "") else None
 
-    active_classes = None
-    if "active_classes" in mapping:
+    import ast
+
+    def _as_literal(key):
+        if key not in mapping or mapping[key] in (None, "None", ""):
+            return None
         try:
-            import ast
-            parsed = ast.literal_eval(mapping["active_classes"])
-            if isinstance(parsed, (list, tuple)):
-                active_classes = [int(x) for x in parsed]
+            return ast.literal_eval(mapping[key])
         except Exception:
-            active_classes = None
+            return None
+
+    active_classes = None
+    parsed = _as_literal("active_classes")
+    if isinstance(parsed, (list, tuple)):
+        active_classes = [int(x) for x in parsed]
+
+    class_confidence = None
+    parsed = _as_literal("class_confidence")
+    if isinstance(parsed, dict):
+        class_confidence = parsed
 
     config.settings.update(
         confidence=_as_float("confidence"),
@@ -110,6 +132,11 @@ def _load_settings() -> None:
         target_fps=_as_int("target_fps"),
         device=mapping.get("device"),
         iou=_as_float("iou"),
+        imgsz=_as_int("imgsz"),
+        class_confidence=class_confidence,
+        track_activation_threshold=_as_float("track_activation_threshold"),
+        lost_track_buffer=_as_int("lost_track_buffer"),
+        minimum_consecutive_frames=_as_int("minimum_consecutive_frames"),
         display_fps=_as_int("display_fps"),
         stream_quality=_as_int("stream_quality"),
         stream_resolution=mapping.get("stream_resolution"),
@@ -185,6 +212,29 @@ def delete_camera(camera_id: int) -> bool:
     return cur.rowcount > 0
 
 
+def get_roi(camera_id: int) -> List[List[int]]:
+    """Polígono de la zona de interés (ROI) de una cámara, o [] si no tiene."""
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT roi_points FROM cameras WHERE id = ?", (camera_id,)
+        ).fetchone()
+    if not row or not row["roi_points"]:
+        return []
+    try:
+        import json
+        return json.loads(row["roi_points"])
+    except Exception:
+        return []
+
+
+def set_roi(camera_id: int, points: List[List[int]]) -> None:
+    import json
+    value = json.dumps(points) if points else None
+    with _lock, _connect() as conn:
+        conn.execute("UPDATE cameras SET roi_points = ? WHERE id = ?", (value, camera_id))
+        conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # Líneas
 # ---------------------------------------------------------------------------
@@ -252,6 +302,31 @@ def record_count(camera_id: int, line_id: int, class_name: str,
             "VALUES(?, ?, ?, ?, ?, ?)",
             (ts, camera_id, line_id, class_name, direction, count),
         )
+        conn.commit()
+
+
+def get_unsynced_counts(limit: int = 500) -> List[Dict]:
+    """Cruces aún no enviados al servidor central, con datos de cámara/línea."""
+    q = """
+        SELECT c.*, cam.name AS camera_name, l.name AS line_name, l.movement AS movement
+        FROM counts c
+        LEFT JOIN cameras cam ON cam.id = c.camera_id
+        LEFT JOIN lines l ON l.id = c.line_id
+        WHERE c.synced = 0
+        ORDER BY c.id
+        LIMIT ?
+    """
+    with _lock, _connect() as conn:
+        rows = conn.execute(q, (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_synced(ids: List[int]) -> None:
+    if not ids:
+        return
+    placeholders = ",".join("?" * len(ids))
+    with _lock, _connect() as conn:
+        conn.execute(f"UPDATE counts SET synced = 1 WHERE id IN ({placeholders})", ids)
         conn.commit()
 
 

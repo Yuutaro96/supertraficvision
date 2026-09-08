@@ -4,11 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Aforo Vehicular · Cámaras</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
   <nav class="navbar">
-    <span class="brand">🚦 Aforo Vehicular</span>
+    <span class="brand">Aforo Vehicular</span>
     <a href="/">Dashboard</a>
     <a href="/cameras" class="active">Cámaras</a>
     <a href="/lines">Líneas</a>
@@ -21,39 +23,43 @@
     <h1>Gestión de Cámaras</h1>
     <p class="subtitle">Agrega, edita o elimina cámaras IP (RTSP/HTTP), webcam local o archivo de video.</p>
 
-    <div class="card">
-      <h2 id="formTitle">Nueva cámara</h2>
-      <input type="hidden" id="camId">
-      <div class="form-row">
-        <div class="field">
-          <label>Nombre</label>
-          <input id="camName" placeholder="Ej. Av. Principal - Norte">
+    <div class="dash-grid">
+      <div>
+        <h2>Cámaras registradas</h2>
+        <div class="card" style="padding:0;overflow:hidden">
+          <table>
+            <thead>
+              <tr><th>ID</th><th>Nombre</th><th>URL</th><th>Estado</th><th>Conexión</th><th>FPS</th><th class="right">Acciones</th></tr>
+            </thead>
+            <tbody id="camTable"></tbody>
+          </table>
         </div>
-        <div class="field" style="flex:1">
+      </div>
+
+      <div class="card">
+        <h2 id="formTitle" style="margin-top:0">Nueva cámara</h2>
+        <input type="hidden" id="camId">
+        <div class="field mt">
+          <label>Nombre</label>
+          <input id="camName" style="width:100%" placeholder="Ej. Av. Principal - Norte">
+        </div>
+        <div class="field mt">
           <label>URL de origen</label>
           <input id="camUrl" style="width:100%" placeholder="rtsp://usuario:pass@192.168.1.50:554/stream  |  0  |  /ruta/video.mp4">
         </div>
-        <div class="field">
-          <label class="check"><input type="checkbox" id="camActive" checked> Activa</label>
+        <div class="field mt">
+          <label class="check"><input type="checkbox" id="camActive" checked> Cámara activa</label>
         </div>
-        <button class="btn green" id="saveCam">Guardar</button>
-        <button class="btn gray hidden" id="cancelEdit">Cancelar</button>
+        <div class="row-btns mt">
+          <button class="btn green" id="saveCam" style="flex:1">Guardar</button>
+          <button class="btn gray hidden" id="cancelEdit">Cancelar</button>
+        </div>
+        <p class="muted" style="font-size:11.5px;margin-top:16px">
+          Ejemplos de URL: <b>rtsp://user:pass@ip:554/Streaming/Channels/101</b> (cámara IP),
+          <b>0</b> (webcam local), <b>/home/ubuntu/video.mp4</b> (archivo de prueba),
+          <b>https://support.visiotechsecurity.com/hc/article_attachments/15639324772380</b> (stream HTTP MJPEG).
+        </p>
       </div>
-      <p class="muted" style="font-size:12px">
-        Ejemplos de URL: <b>rtsp://user:pass@ip:554/Streaming/Channels/101</b> (cámara IP),
-        <b>0</b> (webcam local), <b>/home/ubuntu/video.mp4</b> (archivo de prueba),
-        <b>https://support.visiotechsecurity.com/hc/article_attachments/15639324772380</b> (stream HTTP MJPEG).
-      </p>
-    </div>
-
-    <h2 class="mt">Cámaras registradas</h2>
-    <div class="card">
-      <table>
-        <thead>
-          <tr><th>ID</th><th>Nombre</th><th>URL</th><th>Estado</th><th>Conexión</th><th>FPS</th><th class="right">Acciones</th></tr>
-        </thead>
-        <tbody id="camTable"></tbody>
-      </table>
     </div>
   </div>
 

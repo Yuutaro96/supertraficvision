@@ -7,6 +7,11 @@ let CFG = {
   target_fps: 15,
   device: "auto",
   iou: 0.5,
+  imgsz: 640,
+  class_confidence: {},
+  track_activation_threshold: 0.25,
+  lost_track_buffer: 30,
+  minimum_consecutive_frames: 1,
   display_fps: 25,
   stream_quality: 80,
   stream_resolution: "original",
@@ -69,6 +74,24 @@ async function loadSettings() {
   }
 }
 
+function renderClassConfidenceGrid() {
+  const wrap = $("classConfidenceGrid");
+  wrap.innerHTML = Object.entries(CLASS_NAMES).map(([id, label]) => {
+    const val = CFG.class_confidence[id] != null ? CFG.class_confidence[id] : CFG.confidence;
+    return `<div class="slider-row">
+      <label>${label}: <span class="slider-val" data-conf-val="${id}">${Number(val).toFixed(2)}</span></label>
+      <input type="range" class="class-conf-slider" data-class-id="${id}"
+             min="0.1" max="0.95" step="0.05" value="${val}">
+    </div>`;
+  }).join("");
+  wrap.querySelectorAll(".class-conf-slider").forEach((el) => {
+    el.addEventListener("input", (e) => {
+      document.querySelector(`[data-conf-val="${e.target.dataset.classId}"]`).textContent =
+        Number(e.target.value).toFixed(2);
+    });
+  });
+}
+
 function applyCfgToUI() {
   // Modelo
   document.querySelectorAll("#modelGrid .model-card").forEach((c) => {
@@ -80,6 +103,15 @@ function applyCfgToUI() {
   $("confVal").textContent = Number(CFG.confidence).toFixed(2);
   $("iou").value = CFG.iou;
   $("iouVal").textContent = Number(CFG.iou).toFixed(2);
+  $("imgsz").value = CFG.imgsz;
+  $("imgszVal").textContent = CFG.imgsz;
+  $("track_activation_threshold").value = CFG.track_activation_threshold;
+  $("trackActivationVal").textContent = Number(CFG.track_activation_threshold).toFixed(2);
+  $("lost_track_buffer").value = CFG.lost_track_buffer;
+  $("lostBufferVal").textContent = CFG.lost_track_buffer;
+  $("minimum_consecutive_frames").value = CFG.minimum_consecutive_frames;
+  $("minFramesVal").textContent = CFG.minimum_consecutive_frames;
+  renderClassConfidenceGrid();
   $("target_fps").value = CFG.target_fps;
   $("targetFpsVal").textContent = CFG.target_fps;
   $("display_fps").value = CFG.display_fps;
@@ -119,10 +151,20 @@ function collectCfg() {
     if (chk.checked) classes.push(parseInt(chk.value, 10));
   });
 
+  const classConfidence = {};
+  document.querySelectorAll(".class-conf-slider").forEach((el) => {
+    classConfidence[el.dataset.classId] = parseFloat(el.value);
+  });
+
   return {
     model_size: activeModel ? activeModel.dataset.model : CFG.model_size,
     confidence: parseFloat($("confidence").value),
     iou: parseFloat($("iou").value),
+    imgsz: parseInt($("imgsz").value, 10),
+    class_confidence: classConfidence,
+    track_activation_threshold: parseFloat($("track_activation_threshold").value),
+    lost_track_buffer: parseInt($("lost_track_buffer").value, 10),
+    minimum_consecutive_frames: parseInt($("minimum_consecutive_frames").value, 10),
     target_fps: parseInt($("target_fps").value, 10),
     display_fps: parseInt($("display_fps").value, 10),
     stream_quality: parseInt($("stream_quality").value, 10),
@@ -161,6 +203,12 @@ function initControls() {
   // Sliders con display en vivo
   $("confidence").addEventListener("input", (e) => { $("confVal").textContent = Number(e.target.value).toFixed(2); });
   $("iou").addEventListener("input", (e) => { $("iouVal").textContent = Number(e.target.value).toFixed(2); });
+  $("imgsz").addEventListener("input", (e) => { $("imgszVal").textContent = e.target.value; });
+  $("track_activation_threshold").addEventListener("input", (e) => {
+    $("trackActivationVal").textContent = Number(e.target.value).toFixed(2);
+  });
+  $("lost_track_buffer").addEventListener("input", (e) => { $("lostBufferVal").textContent = e.target.value; });
+  $("minimum_consecutive_frames").addEventListener("input", (e) => { $("minFramesVal").textContent = e.target.value; });
   $("target_fps").addEventListener("input", (e) => { $("targetFpsVal").textContent = e.target.value; });
   $("display_fps").addEventListener("input", (e) => { $("displayFpsVal").textContent = e.target.value; });
   $("stream_quality").addEventListener("input", (e) => { $("qualityVal").textContent = e.target.value + "%"; });

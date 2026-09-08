@@ -16,7 +16,7 @@ import io
 import csv
 import queue
 from contextlib import asynccontextmanager
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import cv2
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
@@ -24,11 +24,12 @@ from fastapi.responses import (
     StreamingResponse, HTMLResponse, JSONResponse, Response, FileResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 import config
 import database
 from camera_manager import manager, mjpeg_generator, EVENT_QUEUE
+from sync_client import sync_client
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +56,13 @@ class LineIn(BaseModel):
     y2: int
     movement: str = "RECTO"
 
+    @field_validator("movement")
+    @classmethod
+    def _validate_movement(cls, v):
+        if v not in config.MOVEMENT_LABELS:
+            raise ValueError(f"movement debe ser uno de: {', '.join(config.MOVEMENT_LABELS)}")
+        return v
+
 
 class LineUpdate(BaseModel):
     name: Optional[str] = None
@@ -64,6 +72,13 @@ class LineUpdate(BaseModel):
     y2: Optional[int] = None
     movement: Optional[str] = None
 
+    @field_validator("movement")
+    @classmethod
+    def _validate_movement(cls, v):
+        if v is not None and v not in config.MOVEMENT_LABELS:
+            raise ValueError(f"movement debe ser uno de: {', '.join(config.MOVEMENT_LABELS)}")
+        return v
+
 
 class SettingsIn(BaseModel):
     confidence: Optional[float] = None
@@ -71,12 +86,21 @@ class SettingsIn(BaseModel):
     target_fps: Optional[int] = None
     device: Optional[str] = None
     iou: Optional[float] = None
+    imgsz: Optional[int] = None
+    class_confidence: Optional[Dict[str, float]] = None
+    track_activation_threshold: Optional[float] = None
+    lost_track_buffer: Optional[int] = None
+    minimum_consecutive_frames: Optional[int] = None
     display_fps: Optional[int] = None
     stream_quality: Optional[int] = None
     stream_resolution: Optional[str] = None
     reconnect_delay: Optional[int] = None
     data_retention_days: Optional[int] = None
     active_classes: Optional[List[int]] = None
+
+
+class RoiIn(BaseModel):
+    points: List[List[int]] = []
 
 
 # ---------------------------------------------------------------------------
@@ -133,10 +157,12 @@ async def event_pump():
 async def lifespan(app: FastAPI):
     database.init_db()
     manager.start_all()
+    sync_client.start()
     pump_task = asyncio.create_task(event_pump())
     print("[main] Aplicación iniciada.")
     yield
     pump_task.cancel()
+    sync_client.stop()
     manager.stop_all()
     print("[main] Aplicación detenida.")
 
@@ -216,13 +242,21 @@ def create_camera(cam: CameraIn):
 
 @app.put("/api/cameras/{camera_id}")
 def update_camera(camera_id: int, cam: CameraUpdate):
-    updated = database.update_camera(camera_id, cam.name, cam.url, cam.active)
-    if not updated:
+    before = database.get_camera(camera_id)
+    if not before:
         raise HTTPException(status_code=404, detail="Cámara no encontrada")
-    # Reiniciar el stream para aplicar cambios
-    manager.stop_camera(camera_id)
-    if updated["active"]:
-        manager.start_camera(updated)
+    updated = database.update_camera(camera_id, cam.name, cam.url, cam.active)
+
+    # Solo reiniciar el stream si cambió la URL o el estado activo/inactivo;
+    # un cambio de nombre no requiere cortar el video en curso.
+    needs_restart = (
+        (cam.url is not None and cam.url != before["url"])
+        or (cam.active is not None and cam.active != bool(before["active"]))
+    )
+    if needs_restart:
+        manager.stop_camera(camera_id)
+        if updated["active"]:
+            manager.start_camera(updated)
     return updated
 
 
@@ -232,6 +266,36 @@ def delete_camera(camera_id: int):
     ok = database.delete_camera(camera_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# API ROI (zona de interés) por cámara
+# ---------------------------------------------------------------------------
+@app.get("/api/cameras/{camera_id}/roi")
+def get_camera_roi(camera_id: int):
+    if not database.get_camera(camera_id):
+        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    return {"points": database.get_roi(camera_id)}
+
+
+@app.put("/api/cameras/{camera_id}/roi")
+def set_camera_roi(camera_id: int, roi: RoiIn):
+    if not database.get_camera(camera_id):
+        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    if roi.points and len(roi.points) < 3:
+        raise HTTPException(status_code=400, detail="Un ROI necesita al menos 3 puntos")
+    database.set_roi(camera_id, roi.points)
+    manager.reload_roi(camera_id)
+    return {"points": roi.points}
+
+
+@app.delete("/api/cameras/{camera_id}/roi")
+def delete_camera_roi(camera_id: int):
+    if not database.get_camera(camera_id):
+        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    database.set_roi(camera_id, [])
+    manager.reload_roi(camera_id)
     return {"ok": True}
 
 

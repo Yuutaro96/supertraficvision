@@ -7,6 +7,7 @@ un frame con las detecciones (ya trackeadas), se evalúa el cruce de cada
 objeto por cada línea y se registra el cruce (IN/OUT) en la base de datos.
 """
 
+from collections import Counter, defaultdict
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -14,6 +15,10 @@ import supervision as sv
 
 import config
 import database
+
+# Cuántos tracker_id recientes se conservan en el historial de votos de
+# clase por cámara, para no crecer sin límite en una sesión de días.
+MAX_TRACKED_VOTES = 2000
 
 
 class LineZoneWrapper:
@@ -62,12 +67,29 @@ class LineCounter:
     def __init__(self, camera_id: int):
         self.camera_id = camera_id
         self.lines: List[LineZoneWrapper] = []
+        # Historial de clases detectadas por tracker_id, para votar la clase
+        # más frecuente al momento del cruce en vez de confiar en un único
+        # frame (donde YOLO puede confundir, por ejemplo, auto con camión).
+        self._track_votes: Dict[int, Counter] = defaultdict(Counter)
         self.load_lines()
 
     def load_lines(self):
-        """(Re)carga las líneas de la cámara desde la base de datos."""
+        """(Re)carga las líneas de la cámara desde la base de datos.
+
+        Conserva el wrapper (y por lo tanto los contadores IN/OUT en memoria)
+        de las líneas que no cambiaron, para que editar o agregar una línea
+        no resetee el conteo en vivo de las demás líneas de la cámara.
+        """
         rows = database.get_lines(self.camera_id)
-        self.lines = [LineZoneWrapper(r) for r in rows]
+        existing = {w.id: w for w in self.lines}
+        new_lines = []
+        for r in rows:
+            w = existing.get(r["id"])
+            unchanged = w is not None and (
+                w.name, w.movement, w.x1, w.y1, w.x2, w.y2
+            ) == (r["name"], r["movement"], r["x1"], r["y1"], r["x2"], r["y2"])
+            new_lines.append(w if unchanged else LineZoneWrapper(r))
+        self.lines = new_lines
 
     def reload_if_changed(self):
         """Recarga si el número de líneas en DB difiere del actual."""
@@ -75,8 +97,26 @@ class LineCounter:
         current_ids = {l.id for l in self.lines}
         db_ids = {r["id"] for r in rows}
         if current_ids != db_ids:
-            # Se agregaron/eliminaron líneas -> recargar (reinicia contadores)
-            self.lines = [LineZoneWrapper(r) for r in rows]
+            self.load_lines()
+
+    def _update_votes(self, detections: sv.Detections) -> None:
+        if detections.tracker_id is None or detections.class_id is None:
+            return
+        for tid, cid in zip(detections.tracker_id, detections.class_id):
+            self._track_votes[int(tid)][int(cid)] += 1
+        # Podar el historial si crece demasiado (sesiones de varios días).
+        if len(self._track_votes) > MAX_TRACKED_VOTES:
+            cutoff = max(self._track_votes) - MAX_TRACKED_VOTES
+            for tid in [t for t in self._track_votes if t < cutoff]:
+                del self._track_votes[tid]
+
+    def _voted_class(self, tracker_id: int, fallback_class_id: int) -> int:
+        """Clase más frecuente detectada para este track (moda), o la del
+        frame actual si el track no tiene historial."""
+        votes = self._track_votes.get(int(tracker_id))
+        if not votes:
+            return fallback_class_id
+        return votes.most_common(1)[0][0]
 
     def update(self, detections: sv.Detections) -> List[Dict]:
         """
@@ -87,6 +127,8 @@ class LineCounter:
         events: List[Dict] = []
         if detections is None or len(detections) == 0:
             return events
+
+        self._update_votes(detections)
 
         for wrapper in self.lines:
             try:
@@ -102,6 +144,8 @@ class LineCounter:
                 idxs = np.where(mask)[0]
                 for i in idxs:
                     class_id = int(detections.class_id[i]) if detections.class_id is not None else -1
+                    if detections.tracker_id is not None:
+                        class_id = self._voted_class(detections.tracker_id[i], class_id)
                     cname = config.class_name(class_id)
                     database.record_count(
                         camera_id=self.camera_id,
