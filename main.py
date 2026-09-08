@@ -415,6 +415,13 @@ def get_settings():
 def update_settings(s: SettingsIn):
     config.settings.update(**s.dict(exclude_none=True))
     database.save_settings(config.settings.to_dict())
+    # Si el modelo ya estaba cargado (alguna cámara activa lo usó, o se
+    # probó/recargó antes) y cambió tamaño/dispositivo, recargarlo ahora
+    # mismo. Si nunca se cargó, no forzarlo aquí (evita descargar el modelo
+    # solo por guardar Ajustes sin cámaras todavía).
+    from detector import VehicleDetector, get_detector
+    if VehicleDetector.instance_exists():
+        get_detector().ensure_model()
     return config.settings.to_dict()
 
 

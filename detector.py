@@ -182,6 +182,12 @@ class VehicleDetector:
 
         return detections
 
+    @classmethod
+    def instance_exists(cls) -> bool:
+        """True si el modelo ya se cargó alguna vez (evita forzar una carga
+        innecesaria, ej. al guardar Ajustes sin ninguna cámara activa aún)."""
+        return cls._instance is not None
+
     @staticmethod
     def create_tracker() -> sv.ByteTrack:
         """
