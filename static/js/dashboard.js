@@ -35,8 +35,10 @@ function cameraTile(cam) {
         <span class="status-dot ${cam.connected ? "on" : ""}"></span>${connText} · ${cam.fps} FPS
       </span>
     </div>
-    <img class="cam-video" src="/stream/${cam.id}" alt="${name}"
-         onerror="this.style.opacity=0.3">
+    <div class="cam-video-wrap">
+      <img class="cam-video" src="/stream/${cam.id}" alt="${name}"
+           onerror="this.style.opacity=0.3">
+    </div>
     <div class="cam-counters">${chips || '<span class="muted">Sin líneas configuradas</span>'}</div>
   </div>`;
 }
@@ -74,17 +76,25 @@ async function renderCameras(status) {
 }
 
 function renderCrossings() {
-  const tbody = document.getElementById("crossings");
-  tbody.innerHTML = crossings.slice(0, 50).map((c) =>
-    `<tr>
-      <td>${fmtTimeShort(c.timestamp)}</td>
-      <td>${escapeHtml(c.camera_name || c.camera_id)}</td>
-      <td>${escapeHtml(c.line_name || "")}</td>
-      <td>${escapeHtml(c.movement || "")}</td>
-      <td>${c.emoji || ""} ${escapeHtml(c.class_name)}</td>
-      <td><span class="tag ${c.direction === "IN" ? "in" : "out"}">${escapeHtml(c.direction)}</span></td>
-    </tr>`
-  ).join("");
+  const wrap = document.getElementById("crossings");
+  if (crossings.length === 0) {
+    wrap.innerHTML = '<div class="muted" style="padding:16px 18px">Sin cruces registrados todavía.</div>';
+    return;
+  }
+  wrap.innerHTML = crossings.slice(0, 50).map((c) => {
+    const dirClass = c.direction === "IN" ? "in" : "out";
+    const lineInfo = [c.line_name, c.movement].filter(Boolean).map(escapeHtml).join(" / ");
+    return `<div class="feed-row">
+      <div class="feed-row-top">
+        <span class="feed-time">${fmtTimeShort(c.timestamp)} · ${escapeHtml(c.camera_name || c.camera_id)}</span>
+        <span class="feed-dir ${dirClass}">${escapeHtml(c.direction)}</span>
+      </div>
+      <div class="feed-row-bottom">
+        <span class="feed-class">${c.emoji || ""} ${escapeHtml(c.class_name)}</span>
+        <span class="feed-line">${lineInfo ? " · " + lineInfo : ""}</span>
+      </div>
+    </div>`;
+  }).join("");
 }
 
 function connectWS() {

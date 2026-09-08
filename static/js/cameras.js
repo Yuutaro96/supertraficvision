@@ -29,8 +29,12 @@ async function loadCameras() {
       <td>${connBadge}</td>
       <td>${st ? st.fps : 0}</td>
       <td class="right">
-        <button class="btn sm" onclick="editCam(${c.id})">Editar</button>
-        <button class="btn sm red" onclick="delCam(${c.id})">Eliminar</button>
+        <button class="icon-btn" title="Editar" onclick="editCam(${c.id})">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1-4.2L15.8 5 19 8.2 8.2 19 4 20Z"/></svg>
+        </button>
+        <button class="icon-btn red" title="Eliminar" onclick="delCam(${c.id})">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13h10l1-13"/></svg>
+        </button>
       </td>
     </tr>`;
   }).join("");

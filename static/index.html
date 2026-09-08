@@ -4,11 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Aforo Vehicular · Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
   <nav class="navbar">
-    <span class="brand">🚦 Aforo Vehicular</span>
+    <span class="brand">Aforo Vehicular</span>
     <a href="/" class="active">Dashboard</a>
     <a href="/cameras">Cámaras</a>
     <a href="/lines">Líneas</a>
@@ -22,21 +24,25 @@
     <h1>Dashboard</h1>
     <p class="subtitle">Vista en tiempo real de cámaras activas y conteos del día.</p>
 
-    <h2>Totales de hoy</h2>
-    <div class="grid grid-stats" id="totals"></div>
+    <div class="dash-grid">
+      <div>
+        <h2>Totales de hoy</h2>
+        <div class="grid grid-stats" id="totals"></div>
 
-    <h2 class="mt">Cámaras activas</h2>
-    <div class="grid grid-cams" id="cameras"></div>
-    <div id="noCams" class="card muted hidden">No hay cámaras activas. Ve a la sección <a href="/cameras">Cámaras</a> para agregar una.</div>
+        <div class="section-head mt">
+          <h2 style="margin:0">Cámaras activas</h2>
+        </div>
+        <div class="grid grid-cams" id="cameras"></div>
+        <div id="noCams" class="card muted hidden">No hay cámaras activas. Ve a la sección <a href="/cameras">Cámaras</a> para agregar una.</div>
+      </div>
 
-    <h2 class="mt">Últimos cruces registrados</h2>
-    <div class="card scroll-y">
-      <table>
-        <thead>
-          <tr><th>Hora</th><th>Cámara</th><th>Línea</th><th>Movimiento</th><th>Clase</th><th>Dirección</th></tr>
-        </thead>
-        <tbody id="crossings"></tbody>
-      </table>
+      <div class="feed-panel">
+        <div class="feed-head">
+          <h2>Últimos cruces</h2>
+          <span class="live-pill"><span class="status-dot on"></span>TIEMPO REAL</span>
+        </div>
+        <div class="feed-list" id="crossings"></div>
+      </div>
     </div>
   </div>
 
