@@ -157,18 +157,23 @@ class VehicleDetector:
         base_conf = min([config.settings.confidence, *class_confidence.values()]) \
             if class_confidence else config.settings.confidence
 
+        # FP16 solo aporta en GPU; en CPU no hace nada y en versiones nuevas
+        # de ultralytics el argumento `half` está deprecado (usan `quantize`
+        # en su lugar), así que solo se pasa cuando realmente aplica.
+        predict_kwargs = dict(
+            conf=base_conf,
+            iou=config.settings.iou,
+            classes=config.settings.active_class_ids,
+            device=config.settings.resolved_device,
+            imgsz=config.settings.imgsz,
+            verbose=False,
+        )
+        if str(self.device).startswith("cuda"):
+            predict_kwargs["half"] = True
+
         try:
             with self._model_lock:
-                results = self.model(
-                    frame,
-                    conf=base_conf,
-                    iou=config.settings.iou,
-                    classes=config.settings.active_class_ids,
-                    device=config.settings.resolved_device,
-                    imgsz=config.settings.imgsz,
-                    half=str(self.device).startswith("cuda"),
-                    verbose=False,
-                )[0]
+                results = self.model(frame, **predict_kwargs)[0]
             detections = sv.Detections.from_ultralytics(results)
         except Exception as exc:  # pragma: no cover
             print(f"[detector] Error en detección: {exc}")
