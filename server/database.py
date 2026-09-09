@@ -12,9 +12,11 @@ sin nube.
 
 import os
 from datetime import datetime, timedelta
+from typing import Optional
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, DateTime, Boolean, Float, delete
+    create_engine, Column, Integer, String, DateTime, Boolean, Float, LargeBinary, delete,
+    inspect, text
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -41,6 +43,13 @@ class CameraStatus(Base):
     last_error = Column(String, default="")
     updated_at = Column(DateTime, default=datetime.utcnow)
 
+    # --- Captura bajo demanda (para validar encuadre sin gastar datos
+    # constantemente): solo se guarda la última imagen por cámara, y el
+    # mini PC solo la envía cuando snapshot_requested queda en True. ---
+    snapshot_requested = Column(Boolean, default=False)
+    snapshot_image = Column(LargeBinary, nullable=True)
+    snapshot_captured_at = Column(DateTime, nullable=True)
+
 
 class Count(Base):
     __tablename__ = "counts"
@@ -59,6 +68,25 @@ class Count(Base):
 
 def init_db():
     Base.metadata.create_all(engine)
+    _migrate_add_missing_columns()
+
+
+def _migrate_add_missing_columns():
+    """create_all() no altera tablas ya existentes. Como el servicio en
+    Railway/Render ya tiene `camera_status` creada de antes, agregamos acá
+    las columnas nuevas que falten (migración mínima, sin Alembic)."""
+    inspector = inspect(engine)
+    existing = {col["name"] for col in inspector.get_columns("camera_status")}
+    new_columns = {
+        "snapshot_requested": "BOOLEAN DEFAULT FALSE",
+        "snapshot_image": "BYTEA" if engine.url.get_backend_name() == "postgresql" else "BLOB",
+        "snapshot_captured_at": "TIMESTAMP",
+    }
+    with engine.begin() as conn:
+        for name, ddl_type in new_columns.items():
+            if name not in existing:
+                conn.execute(text(f"ALTER TABLE camera_status ADD COLUMN {name} {ddl_type}"))
+                print(f"[server] Migración: columna '{name}' agregada a camera_status.")
 
 
 def upsert_camera_status(site_id: str, cameras: list) -> None:
@@ -107,9 +135,65 @@ def get_camera_statuses() -> list:
                 "fps": r.fps,
                 "last_error": r.last_error,
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                "snapshot_requested": bool(r.snapshot_requested),
+                "has_snapshot": r.snapshot_image is not None,
+                "snapshot_captured_at": r.snapshot_captured_at.isoformat() if r.snapshot_captured_at else None,
             }
             for r in rows
         ]
+
+
+def request_snapshot(site_id: str, camera_name: str) -> bool:
+    """Marca una cámara para que el mini PC mande una captura en su próximo
+    ciclo de sincronización. Devuelve False si la cámara no existe todavía
+    (no ha hecho ningún /api/ingest)."""
+    with SessionLocal() as session:
+        row = (
+            session.query(CameraStatus)
+            .filter_by(site_id=site_id, name=camera_name)
+            .one_or_none()
+        )
+        if row is None:
+            return False
+        row.snapshot_requested = True
+        session.commit()
+        return True
+
+
+def get_pending_snapshot_requests(site_id: str) -> list:
+    with SessionLocal() as session:
+        rows = (
+            session.query(CameraStatus)
+            .filter_by(site_id=site_id, snapshot_requested=True)
+            .all()
+        )
+        return [r.name for r in rows]
+
+
+def save_snapshot(site_id: str, camera_name: str, image_bytes: bytes) -> bool:
+    with SessionLocal() as session:
+        row = (
+            session.query(CameraStatus)
+            .filter_by(site_id=site_id, name=camera_name)
+            .one_or_none()
+        )
+        if row is None:
+            return False
+        row.snapshot_image = image_bytes
+        row.snapshot_captured_at = datetime.utcnow()
+        row.snapshot_requested = False
+        session.commit()
+        return True
+
+
+def get_snapshot(site_id: str, camera_name: str) -> Optional[bytes]:
+    with SessionLocal() as session:
+        row = (
+            session.query(CameraStatus)
+            .filter_by(site_id=site_id, name=camera_name)
+            .one_or_none()
+        )
+        return row.snapshot_image if row else None
 
 
 def totals_by_class() -> dict:
