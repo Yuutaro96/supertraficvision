@@ -214,3 +214,12 @@ SYNC_SERVER_URL = os.environ.get("SYNC_SERVER_URL", "").rstrip("/")
 SYNC_API_KEY = os.environ.get("SYNC_API_KEY", "")
 SYNC_SITE_ID = os.environ.get("SYNC_SITE_ID", "sitio-1")
 SYNC_INTERVAL_SECONDS = int(os.environ.get("SYNC_INTERVAL_SECONDS", "300"))
+
+# ---------------------------------------------------------------------------
+# Control PTZ de cámaras EZVIZ (opcional)
+# ---------------------------------------------------------------------------
+# Cuenta EZVIZ (la misma que usas en la app/EZVIZ Studio) usada para mover
+# cámaras marcadas con control_protocol="ezviz_cloud". Si falta, el control
+# PTZ de esas cámaras devuelve error pero el resto de la app sigue igual.
+EZVIZ_ACCOUNT = os.environ.get("EZVIZ_ACCOUNT", "")
+EZVIZ_PASSWORD = os.environ.get("EZVIZ_PASSWORD", "")

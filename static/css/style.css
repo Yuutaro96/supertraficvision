@@ -308,3 +308,27 @@ label.check input { min-width: auto; accent-color: var(--cyan); }
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
 .scroll-y { max-height: 420px; overflow-y: auto; }
 canvas.chart { max-height: 320px; }
+
+/* ---- Control PTZ (modal + joystick) ---- */
+.ptz-overlay {
+  position: fixed; inset: 0; background: oklch(0 0 0 / 0.55);
+  display: flex; align-items: center; justify-content: center; z-index: 1000;
+}
+.ptz-modal { width: 280px; padding: 20px; }
+.ptz-modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.ptz-pad {
+  display: grid; grid-template-columns: repeat(3, 48px); grid-template-rows: repeat(2, 48px);
+  gap: 6px; justify-content: center; margin: 0 auto 14px;
+}
+.ptz-btn {
+  background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text);
+  border-radius: 8px; font-size: 18px; cursor: pointer; transition: background .1s;
+  user-select: none; -webkit-user-select: none; touch-action: none;
+}
+.ptz-btn:active, .ptz-btn.pressed { background: var(--cyan); color: oklch(0.15 0.015 250); }
+.ptz-up    { grid-column: 2; grid-row: 1; }
+.ptz-left  { grid-column: 1; grid-row: 2; }
+.ptz-right { grid-column: 3; grid-row: 2; }
+.ptz-down  { grid-column: 2; grid-row: 2; }
+.ptz-zoom-row { display: flex; gap: 10px; }
+.ptz-zoom-row .btn { flex: 1; }

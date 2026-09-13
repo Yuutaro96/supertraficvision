@@ -35,12 +35,15 @@ def init_db() -> None:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS cameras (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                name        TEXT NOT NULL,
-                url         TEXT NOT NULL,
-                active      INTEGER NOT NULL DEFAULT 1,
-                created_at  TEXT NOT NULL,
-                roi_points  TEXT
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                name              TEXT NOT NULL,
+                url               TEXT NOT NULL,
+                active            INTEGER NOT NULL DEFAULT 1,
+                created_at        TEXT NOT NULL,
+                roi_points        TEXT,
+                ptz_capable       INTEGER NOT NULL DEFAULT 0,
+                control_protocol  TEXT NOT NULL DEFAULT 'none',
+                control_config    TEXT
             );
 
             CREATE TABLE IF NOT EXISTS lines (
@@ -87,6 +90,16 @@ def init_db() -> None:
             conn.commit()
         except sqlite3.OperationalError:
             pass
+        for ddl in (
+            "ALTER TABLE cameras ADD COLUMN ptz_capable INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE cameras ADD COLUMN control_protocol TEXT NOT NULL DEFAULT 'none'",
+            "ALTER TABLE cameras ADD COLUMN control_config TEXT",
+        ):
+            try:
+                conn.execute(ddl)
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
     _load_settings()
 
 
@@ -176,11 +189,16 @@ def get_camera(camera_id: int) -> Optional[Dict]:
     return dict(row) if row else None
 
 
-def create_camera(name: str, url: str, active: bool = True) -> Dict:
+def create_camera(name: str, url: str, active: bool = True,
+                   ptz_capable: bool = False, control_protocol: str = "none",
+                   control_config: Optional[str] = None) -> Dict:
     with _lock, _connect() as conn:
         cur = conn.execute(
-            "INSERT INTO cameras(name, url, active, created_at) VALUES(?, ?, ?, ?)",
-            (name, url, 1 if active else 0, datetime.now().isoformat()),
+            """INSERT INTO cameras(name, url, active, created_at, ptz_capable,
+                                    control_protocol, control_config)
+               VALUES(?, ?, ?, ?, ?, ?, ?)""",
+            (name, url, 1 if active else 0, datetime.now().isoformat(),
+             1 if ptz_capable else 0, control_protocol, control_config),
         )
         conn.commit()
         cid = cur.lastrowid
@@ -188,17 +206,25 @@ def create_camera(name: str, url: str, active: bool = True) -> Dict:
 
 
 def update_camera(camera_id: int, name: str = None, url: str = None,
-                  active: bool = None) -> Optional[Dict]:
+                  active: bool = None, ptz_capable: bool = None,
+                  control_protocol: str = None,
+                  control_config: Optional[str] = None) -> Optional[Dict]:
     cam = get_camera(camera_id)
     if not cam:
         return None
     name = name if name is not None else cam["name"]
     url = url if url is not None else cam["url"]
     active = active if active is not None else bool(cam["active"])
+    ptz_capable = ptz_capable if ptz_capable is not None else bool(cam["ptz_capable"])
+    control_protocol = control_protocol if control_protocol is not None else cam["control_protocol"]
+    control_config = control_config if control_config is not None else cam["control_config"]
     with _lock, _connect() as conn:
         conn.execute(
-            "UPDATE cameras SET name=?, url=?, active=? WHERE id=?",
-            (name, url, 1 if active else 0, camera_id),
+            """UPDATE cameras SET name=?, url=?, active=?, ptz_capable=?,
+                                   control_protocol=?, control_config=?
+               WHERE id=?""",
+            (name, url, 1 if active else 0, 1 if ptz_capable else 0,
+             control_protocol, control_config, camera_id),
         )
         conn.commit()
     return get_camera(camera_id)

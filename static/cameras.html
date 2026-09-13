@@ -50,6 +50,22 @@
         <div class="field mt">
           <label class="check"><input type="checkbox" id="camActive" checked> Cámara activa</label>
         </div>
+        <div class="field mt">
+          <label class="check"><input type="checkbox" id="camPtz"> Cámara PTZ (pan/tilt/zoom)</label>
+        </div>
+        <div id="ptzConfigFields" class="hidden">
+          <div class="field mt">
+            <label>Protocolo de control</label>
+            <select id="camProtocol" style="width:100%">
+              <option value="ezviz_cloud">EZVIZ Cloud</option>
+              <option value="onvif">ONVIF (próximamente)</option>
+            </select>
+          </div>
+          <div class="field mt" id="ezvizSerialField">
+            <label>Número de serie EZVIZ (SN)</label>
+            <input id="camDeviceSerial" style="width:100%" placeholder="Ej. K30105213">
+          </div>
+        </div>
         <div class="row-btns mt">
           <button class="btn green" id="saveCam" style="flex:1">Guardar</button>
           <button class="btn gray hidden" id="cancelEdit">Cancelar</button>
@@ -60,6 +76,30 @@
           <b>https://support.visiotechsecurity.com/hc/article_attachments/15639324772380</b> (stream HTTP MJPEG).
         </p>
       </div>
+    </div>
+  </div>
+
+  <div class="ptz-overlay hidden" id="ptzOverlay">
+    <div class="ptz-modal card">
+      <div class="ptz-modal-head">
+        <h2 id="ptzModalTitle" style="margin:0">Control PTZ</h2>
+        <button class="icon-btn" id="ptzClose">✕</button>
+      </div>
+      <div class="ptz-pad">
+        <button class="ptz-btn ptz-up" data-dir="up">▲</button>
+        <button class="ptz-btn ptz-left" data-dir="left">◀</button>
+        <button class="ptz-btn ptz-right" data-dir="right">▶</button>
+        <button class="ptz-btn ptz-down" data-dir="down">▼</button>
+      </div>
+      <div class="ptz-zoom-row">
+        <button class="btn gray" id="ptzZoomOut">－ Zoom</button>
+        <button class="btn gray" id="ptzZoomIn">Zoom ＋</button>
+      </div>
+      <p class="muted" style="font-size:11.5px;margin-top:10px">
+        Mantén presionada una flecha para mover la cámara; suéltala para detenerla.
+        El zoom no está garantizado en todos los modelos (algunas PTZ económicas
+        solo hacen zoom digital desde la app, sin motor real).
+      </p>
     </div>
   </div>
 

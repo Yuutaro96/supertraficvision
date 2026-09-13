@@ -28,6 +28,7 @@ from pydantic import BaseModel, field_validator
 
 import config
 import database
+import ptz_controller
 from camera_manager import manager, mjpeg_generator, EVENT_QUEUE
 from sync_client import sync_client
 
@@ -39,12 +40,27 @@ class CameraIn(BaseModel):
     name: str
     url: str
     active: bool = True
+    ptz_capable: bool = False
+    control_protocol: str = "none"
+    control_config: Optional[str] = None
 
 
 class CameraUpdate(BaseModel):
     name: Optional[str] = None
     url: Optional[str] = None
     active: Optional[bool] = None
+    ptz_capable: Optional[bool] = None
+    control_protocol: Optional[str] = None
+    control_config: Optional[str] = None
+
+
+class PTZMoveIn(BaseModel):
+    direction: str  # "up" | "down" | "left" | "right"
+    speed: int = 5
+
+
+class PTZZoomIn(BaseModel):
+    direction: str  # "in" | "out"
 
 
 class LineIn(BaseModel):
@@ -234,7 +250,10 @@ def list_cameras():
 
 @app.post("/api/cameras")
 def create_camera(cam: CameraIn):
-    created = database.create_camera(cam.name, cam.url, cam.active)
+    created = database.create_camera(
+        cam.name, cam.url, cam.active,
+        cam.ptz_capable, cam.control_protocol, cam.control_config,
+    )
     if created and created["active"]:
         manager.start_camera(created)
     return created
@@ -245,7 +264,10 @@ def update_camera(camera_id: int, cam: CameraUpdate):
     before = database.get_camera(camera_id)
     if not before:
         raise HTTPException(status_code=404, detail="Cámara no encontrada")
-    updated = database.update_camera(camera_id, cam.name, cam.url, cam.active)
+    updated = database.update_camera(
+        camera_id, cam.name, cam.url, cam.active,
+        cam.ptz_capable, cam.control_protocol, cam.control_config,
+    )
 
     # Solo reiniciar el stream si cambió la URL o el estado activo/inactivo;
     # un cambio de nombre no requiere cortar el video en curso.
@@ -296,6 +318,51 @@ def delete_camera_roi(camera_id: int):
         raise HTTPException(status_code=404, detail="Cámara no encontrada")
     database.set_roi(camera_id, [])
     manager.reload_roi(camera_id)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# API PTZ (pan/tilt/zoom) por cámara
+# ---------------------------------------------------------------------------
+def _get_ptz_camera_or_404(camera_id: int) -> dict:
+    cam = database.get_camera(camera_id)
+    if not cam:
+        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    if not cam["ptz_capable"]:
+        raise HTTPException(status_code=400, detail="Esta cámara no está marcada como PTZ")
+    return cam
+
+
+@app.post("/api/cameras/{camera_id}/ptz/move")
+def ptz_move(camera_id: int, body: PTZMoveIn):
+    cam = _get_ptz_camera_or_404(camera_id)
+    try:
+        controller = ptz_controller.get_ptz_controller(cam)
+        controller.move(body.direction, body.speed)
+    except ptz_controller.PTZError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
+@app.post("/api/cameras/{camera_id}/ptz/stop")
+def ptz_stop(camera_id: int, body: PTZMoveIn):
+    cam = _get_ptz_camera_or_404(camera_id)
+    try:
+        controller = ptz_controller.get_ptz_controller(cam)
+        controller.stop(body.direction)
+    except ptz_controller.PTZError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
+@app.post("/api/cameras/{camera_id}/ptz/zoom")
+def ptz_zoom(camera_id: int, body: PTZZoomIn):
+    cam = _get_ptz_camera_or_404(camera_id)
+    try:
+        controller = ptz_controller.get_ptz_controller(cam)
+        controller.zoom(body.direction)
+    except ptz_controller.PTZError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True}
 
 
