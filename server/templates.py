@@ -17,6 +17,7 @@ from urllib.parse import quote
 PAGE_CSS = """
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
+  html, body { max-width: 100%; overflow-x: hidden; }
   body { font-family: system-ui, -apple-system, sans-serif; background: #0f1115; color: #e6edf3;
          margin: 0; padding: 0 16px 32px; }
   h1 { font-size: 18px; margin: 0; }
@@ -51,7 +52,8 @@ PAGE_CSS = """
   .filters select, .filters input { padding: 7px 9px; background: #0d1117; color: #e6edf3;
                                      border: 1px solid #30363d; border-radius: 5px; font-size: 13px; }
   .chart-box { background: #161b22; border: 1px solid #2b3444; border-radius: 8px; padding: 14px; margin-bottom: 20px; }
-  .chart-box canvas { max-width: 100%; }
+  .chart-box .chart-frame { position: relative; height: 280px; width: 100%; }
+  .chart-box canvas { max-width: 100%; max-height: 100%; }
   .tag-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
                font-weight: 600; }
   .tag-badge.pending { background: #3d2f00; color: #e3b341; }
@@ -83,6 +85,7 @@ PAGE_CSS = """
     .cam-card .row span:first-child { color: #8b949e; }
     .filters { flex-direction: column; align-items: stretch; }
     .modal { padding: 14px; }
+    .chart-box .chart-frame { height: 220px; }
   }
 """
 
@@ -243,11 +246,11 @@ def reports_html(site_ids: list, selected_site: str, hours: int,
 
       <div class="chart-box">
         <h2 style="margin-top:0">Conteos por hora y clase</h2>
-        <canvas id="hourChart" height="220"></canvas>
+        <div class="chart-frame"><canvas id="hourChart"></canvas></div>
       </div>
       <div class="chart-box">
         <h2 style="margin-top:0">Distribución por clase</h2>
-        <canvas id="classChart" height="220"></canvas>
+        <div class="chart-frame"><canvas id="classChart"></canvas></div>
       </div>
 
       <div class="btn-row">
@@ -280,6 +283,7 @@ def reports_html(site_ids: list, selected_site: str, hours: int,
           }},
           options: {{
             responsive: true,
+            maintainAspectRatio: false,
             scales: {{ x: {{ stacked: true, ticks: {{ color: "#8b949e" }} }},
                        y: {{ stacked: true, ticks: {{ color: "#8b949e" }} }} }},
             plugins: {{ legend: {{ labels: {{ color: "#e6edf3" }} }} }},
@@ -292,7 +296,7 @@ def reports_html(site_ids: list, selected_site: str, hours: int,
             labels: Object.keys(totals),
             datasets: [{{ data: Object.values(totals), backgroundColor: palette }}],
           }},
-          options: {{ responsive: true, plugins: {{ legend: {{ labels: {{ color: "#e6edf3" }} }} }} }},
+          options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ labels: {{ color: "#e6edf3" }} }} }} }},
         }});
 
         async function resetReports() {{
