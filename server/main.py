@@ -114,6 +114,25 @@ class LineCommandResultIn(BaseModel):
     error: str = ""
 
 
+class IntersectionInfoIn(BaseModel):
+    display_name: Optional[str] = None
+    mts_code: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class MarkerIn(BaseModel):
+    name: str
+    movement: str
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+
+
+MAX_SCHEMATIC_BYTES = 6 * 1024 * 1024  # 6 MB: es un documento subido una sola vez, no algo periódico
+ALLOWED_SCHEMATIC_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+
 async def purge_loop():
     while True:
         try:
@@ -236,6 +255,75 @@ def get_line_mirror(site_id: str, _=Depends(require_login)):
     return database.get_line_mirror(site_id)
 
 
+# ---------------------------------------------------------------------------
+# Catálogo de intersecciones: ficha + esquema de señalización + espiras
+# marcadas a mano sobre esa imagen (documentación, ver nota en database.py
+# sobre por qué no hay correspondencia geométrica automática con las
+# líneas de conteo reales).
+# ---------------------------------------------------------------------------
+async def _save_schematic(site_id: str, image: UploadFile):
+    if image.content_type not in ALLOWED_SCHEMATIC_TYPES:
+        raise HTTPException(400, f"Formato no soportado ({image.content_type}); solo se acepta JPEG, PNG o WEBP. "
+                                  "Si tienes un PDF, exporta/haz captura de la página como imagen primero.")
+    data = await image.read()
+    if len(data) > MAX_SCHEMATIC_BYTES:
+        raise HTTPException(413, "Imagen demasiado grande (máximo 6 MB)")
+    return database.save_intersection_schematic(site_id, data, image.content_type)
+
+
+@app.post("/api/admin/intersections/{site_id}")
+def admin_upsert_intersection(site_id: str, info: IntersectionInfoIn, _=Depends(require_login)):
+    return database.upsert_intersection(site_id, info.display_name, info.mts_code, info.notes)
+
+
+@app.post("/api/admin/intersections/{site_id}/schematic")
+async def admin_upload_schematic(site_id: str, image: UploadFile = File(...), _=Depends(require_login)):
+    return await _save_schematic(site_id, image)
+
+
+@app.get("/api/intersections/{site_id}")
+def edge_get_intersection(site_id: str, _=Depends(require_api_key)):
+    return database.get_intersection(site_id) or {
+        "site_id": site_id, "display_name": None, "mts_code": None,
+        "notes": None, "has_schematic": False, "updated_at": None,
+    }
+
+
+@app.post("/api/intersections/{site_id}")
+def edge_upsert_intersection(site_id: str, info: IntersectionInfoIn, _=Depends(require_api_key)):
+    return database.upsert_intersection(site_id, info.display_name, info.mts_code, info.notes)
+
+
+@app.post("/api/intersections/{site_id}/schematic")
+async def edge_upload_schematic(site_id: str, image: UploadFile = File(...), _=Depends(require_api_key)):
+    return await _save_schematic(site_id, image)
+
+
+@app.get("/api/intersections/{site_id}/schematic")
+def view_schematic(site_id: str, _=Depends(require_login)):
+    data = database.get_intersection_schematic(site_id)
+    if not data:
+        raise HTTPException(404, "Esta intersección todavía no tiene un esquema subido")
+    image_bytes, content_type = data
+    return Response(content=image_bytes, media_type=content_type)
+
+
+@app.post("/api/intersections/{site_id}/marker")
+def create_marker(site_id: str, marker: MarkerIn, _=Depends(require_login)):
+    if marker.movement not in MOVEMENT_LABELS:
+        raise HTTPException(400, f"movement debe ser uno de: {', '.join(MOVEMENT_LABELS)}")
+    return database.create_intersection_marker(
+        site_id, marker.name, marker.movement, marker.x1, marker.y1, marker.x2, marker.y2,
+    )
+
+
+@app.delete("/api/intersections/marker/{marker_id}")
+def delete_marker(marker_id: int, _=Depends(require_login)):
+    ok = database.delete_intersection_marker(marker_id)
+    if not ok:
+        raise HTTPException(404, "Marcador no encontrado")
+    return {"ok": True}
+
 
 
 @app.get("/api/export/csv")
@@ -313,3 +401,26 @@ def lines_page(site_id: str = "", camera_name: str = "", _=Depends(require_login
         site_ids, cameras_by_site, site_id, camera_name,
         mirror_lines, MOVEMENT_LABELS, recent_commands,
     ))
+
+
+@app.get("/intersections", response_class=HTMLResponse)
+def intersections_page(_=Depends(require_login)):
+    cameras = database.get_camera_statuses()
+    known_sites = {c["site_id"] for c in cameras}
+    intersections = database.get_intersections()
+    known_sites |= {i["site_id"] for i in intersections}
+    by_site = {i["site_id"]: i for i in intersections}
+    catalog = [by_site.get(sid, {"site_id": sid, "display_name": None, "mts_code": None,
+                                  "notes": None, "has_schematic": False, "updated_at": None})
+               for sid in sorted(known_sites)]
+    return HTMLResponse(templates.intersections_html(catalog))
+
+
+@app.get("/intersections/{site_id}", response_class=HTMLResponse)
+def intersection_detail_page(site_id: str, _=Depends(require_login)):
+    info = database.get_intersection(site_id) or {
+        "site_id": site_id, "display_name": None, "mts_code": None,
+        "notes": None, "has_schematic": False, "updated_at": None,
+    }
+    markers = database.get_intersection_markers(site_id)
+    return HTMLResponse(templates.intersection_detail_html(info, markers, MOVEMENT_LABELS))

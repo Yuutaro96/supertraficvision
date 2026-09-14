@@ -31,6 +31,7 @@
       <button class="tab" data-tab="stream">📹 Stream de Video</button>
       <button class="tab" data-tab="db">🗄️ Base de Datos</button>
       <button class="tab" data-tab="sistema">ℹ️ Sistema</button>
+      <button class="tab" data-tab="sync">🔗 Sincronización</button>
     </div>
 
     <!-- ============ PESTAÑA 1: MODELO IA ============ -->
@@ -246,6 +247,42 @@
       <div class="card">
         <h2>Acerca de</h2>
         <p class="muted">SuperTraficVision <b>v1.0</b> — Sistema de detección y aforo vehicular con YOLOv8 + Supervision.</p>
+      </div>
+    </section>
+
+    <!-- ============ PESTAÑA 5: SINCRONIZACIÓN ============ -->
+    <section class="tab-panel" id="panel-sync">
+      <div class="card" id="syncDisabledCard">
+        <p class="muted">La sincronización con el panel central no está configurada en este mini PC (falta <code>SYNC_SERVER_URL</code>). Estas opciones no están disponibles.</p>
+      </div>
+      <div class="card hidden" id="syncEnabledCard">
+        <h2>Ficha de la intersección (panel central)</h2>
+        <p class="muted">Estos datos y el esquema se guardan en el panel central (Railway), para el catálogo de intersecciones.</p>
+        <div class="field mt">
+          <label>Nombre de la intersección</label>
+          <input id="intDisplayName" style="width:100%" placeholder="Ej. Quito y 12 de Febrero">
+        </div>
+        <div class="field mt">
+          <label>Código (ej. MTS-LA-001)</label>
+          <input id="intMtsCode" style="width:100%" placeholder="Ej. MTS-LA-001">
+        </div>
+        <div class="field mt">
+          <label>Notas</label>
+          <input id="intNotes" style="width:100%" placeholder="Opcional">
+        </div>
+        <div class="row-btns mt">
+          <button class="btn" id="saveIntInfoBtn">Guardar datos</button>
+        </div>
+      </div>
+
+      <div class="card hidden" id="syncSchematicCard">
+        <h2>Esquema de señalización</h2>
+        <p class="muted">Solo imágenes (JPEG/PNG/WEBP) — si tienes un PDF, exporta/captura la página como imagen primero. Una vez subido, las espiras se marcan sobre él directamente en el panel central.</p>
+        <input type="file" id="schematicFileInput" accept="image/jpeg,image/png,image/webp">
+        <div class="row-btns mt">
+          <button class="btn" id="uploadSchematicBtn">Subir / reemplazar esquema</button>
+          <a class="btn gray" id="openIntersectionLink" href="#" target="_blank" style="text-decoration:none">Abrir ficha en el panel central ↗</a>
+        </div>
       </div>
     </section>
   </div>

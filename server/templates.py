@@ -91,10 +91,11 @@ PAGE_CSS = """
 
 
 def nav_html(active: str) -> str:
-    items = [("/", "Estado"), ("/reports", "Reportes"), ("/lines", "Líneas")]
+    items = [("/", "Estado"), ("/reports", "Reportes"), ("/lines", "Líneas"),
+             ("/intersections", "Intersecciones")]
     links = "".join(
         f'<a href="{href}" class="{"active" if key == active else ""}">{label}</a>'
-        for key, (href, label) in zip(["status", "reports", "lines"], items)
+        for key, (href, label) in zip(["status", "reports", "lines", "intersections"], items)
     )
     return f'<nav><span style="font-weight:700;margin-right:10px">🚦 Aforo Visión</span>{links}</nav>'
 
@@ -482,3 +483,210 @@ def lines_html(site_ids: list, cameras_by_site: dict, selected_site: str,
       </script>
     """
     return page_shell("Líneas", "lines", body)
+
+
+# ---------------------------------------------------------------------------
+# Página: Intersecciones (catálogo)
+# ---------------------------------------------------------------------------
+def intersections_html(catalog: list) -> str:
+    cards = "".join(f"""
+      <a href="/intersections/{quote(i['site_id'])}" class="int-card">
+        {f"<img class='int-thumb' src='/api/intersections/{quote(i['site_id'])}/schematic'>" if i['has_schematic'] else "<div class='int-thumb int-thumb-empty'>Sin esquema</div>"}
+        <div class="int-card-body">
+          <div class="int-card-title">{i['display_name'] or i['site_id']}</div>
+          <div class="muted">{i['mts_code'] or ''}</div>
+          <div class="muted">Sitio: {i['site_id']}</div>
+        </div>
+      </a>
+    """ for i in catalog) or "<p class='muted'>Sin sitios reportados todavía.</p>"
+
+    body = f"""
+      <h1>Intersecciones</h1>
+      <p class="muted">Ficha de cada intersección: esquema de señalización y espiras marcadas para documentación de campo.</p>
+      <div class="int-grid">{cards}</div>
+    """
+    extra_css = """<style>
+      .int-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-top: 16px; }
+      .int-card { display: block; background: #161b22; border: 1px solid #2b3444; border-radius: 8px;
+                  overflow: hidden; text-decoration: none; color: inherit; }
+      .int-card:hover { border-color: #2f81f7; }
+      .int-thumb { width: 100%; height: 130px; object-fit: cover; display: block; background: #0d1117; }
+      .int-thumb-empty { display: flex; align-items: center; justify-content: center; color: #8b949e; font-size: 12px; }
+      .int-card-body { padding: 10px 12px; }
+      .int-card-title { font-weight: 600; font-size: 14px; }
+    </style>"""
+    return page_shell("Intersecciones", "intersections", body, extra_head=extra_css)
+
+
+# ---------------------------------------------------------------------------
+# Página: Ficha de intersección (esquema + espiras)
+# ---------------------------------------------------------------------------
+def intersection_detail_html(info: dict, markers: list, movement_labels: list) -> str:
+    site_id = info["site_id"]
+    movement_options = "".join(f"<option value='{m}'>{m}</option>" for m in movement_labels)
+
+    markers_html = "".join(
+        f"<div><span>{m['name']} — {m['movement']}</span>"
+        f"<button class='snap-btn' onclick=\"deleteMarker({m['id']})\">🗑 Borrar</button></div>"
+        for m in markers
+    ) or "<p class='muted'>Sin espiras marcadas todavía.</p>"
+
+    schematic_section = f"""
+      <canvas id="schemCanvas" width="700" height="450"></canvas>
+      <p class="muted" id="schemCoords">Coordenadas: —</p>
+      <div class="field">
+        <label>Nombre de la espira</label>
+        <input id="markerNameInput" placeholder="Ej. Espira Norte">
+      </div>
+      <div class="field">
+        <label>Movimiento / Dirección</label>
+        <select id="markerMovementInput">{movement_options}</select>
+      </div>
+      <div class="btn-row">
+        <button class="button" id="addMarkerBtn" onclick="addMarker()" disabled>Agregar espira</button>
+        <button class="snap-btn" onclick="resetMarkerDraw()">Reiniciar dibujo</button>
+      </div>
+      <h2>Espiras marcadas</h2>
+      <div class="existing-lines" id="markersList">{markers_html}</div>
+    """ if info["has_schematic"] else "<p class='muted'>Sube un esquema (imagen) arriba para poder marcar espiras sobre él.</p>"
+
+    body = f"""
+      <p><a href="/intersections" style="color:#2f81f7;text-decoration:none">&larr; Volver al catálogo</a></p>
+      <h1>{info['display_name'] or site_id}</h1>
+      <p class="muted">Sitio: {site_id}</p>
+
+      <h2>Datos de la intersección</h2>
+      <div class="field"><label>Nombre</label><input id="displayNameInput" value="{info['display_name'] or ''}"></div>
+      <div class="field"><label>Código (ej. MTS-LA-001)</label><input id="mtsCodeInput" value="{info['mts_code'] or ''}"></div>
+      <div class="field"><label>Notas</label><input id="notesInput" value="{info['notes'] or ''}"></div>
+      <div class="btn-row"><button class="button" onclick="saveInfo()">Guardar datos</button></div>
+
+      <h2>Esquema de señalización</h2>
+      <p class="muted">Solo imágenes (JPEG/PNG/WEBP) — si tienes un PDF, exporta/captura la página como imagen primero.</p>
+      <input type="file" id="schematicFile" accept="image/jpeg,image/png,image/webp">
+      <div class="btn-row"><button class="button" onclick="uploadSchematic()">Subir / reemplazar esquema</button></div>
+
+      <h2>Espiras sobre el esquema</h2>
+      {schematic_section}
+
+      <script>
+        const siteId = {json.dumps(site_id)};
+        const hasSchematic = {json.dumps(info["has_schematic"])};
+
+        async function saveInfo() {{
+          const body = {{
+            display_name: document.getElementById("displayNameInput").value.trim(),
+            mts_code: document.getElementById("mtsCodeInput").value.trim(),
+            notes: document.getElementById("notesInput").value.trim(),
+          }};
+          const resp = await fetch(`/api/admin/intersections/${{siteId}}`, {{
+            method: "POST", headers: {{ "Content-Type": "application/json" }}, body: JSON.stringify(body),
+          }});
+          if (resp.ok) {{ alert("Datos guardados."); location.reload(); }}
+          else {{ alert("No se pudo guardar: " + (await resp.text())); }}
+        }}
+
+        async function uploadSchematic() {{
+          const input = document.getElementById("schematicFile");
+          if (!input.files.length) {{ alert("Elige un archivo primero"); return; }}
+          const fd = new FormData();
+          fd.append("image", input.files[0]);
+          const resp = await fetch(`/api/admin/intersections/${{siteId}}/schematic`, {{ method: "POST", body: fd }});
+          if (resp.ok) {{ alert("Esquema subido."); location.reload(); }}
+          else {{ alert("No se pudo subir: " + (await resp.text())); }}
+        }}
+      </script>
+    """
+
+    if info["has_schematic"]:
+        markers_json = json.dumps(markers)
+        body += f"""
+      <script>
+        let imgW = 0, imgH = 0, pointA = null, pointB = null, bgImg = null;
+        const markers = {markers_json};
+        const canvas = document.getElementById("schemCanvas");
+        const ctx = canvas.getContext("2d");
+
+        function scaleFactors() {{ return {{ sx: canvas.width / imgW, sy: canvas.height / imgH }}; }}
+        function canvasToImage(cx, cy) {{
+          const {{ sx, sy }} = scaleFactors();
+          return {{ x: Math.round(cx / sx), y: Math.round(cy / sy) }};
+        }}
+        function imageToCanvas(ix, iy) {{
+          const {{ sx, sy }} = scaleFactors();
+          return {{ x: ix * sx, y: iy * sy }};
+        }}
+
+        function redraw() {{
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          if (bgImg) ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
+          ctx.lineWidth = 2;
+          markers.forEach(m => {{
+            const a = imageToCanvas(m.x1, m.y1), b = imageToCanvas(m.x2, m.y2);
+            ctx.strokeStyle = "#2f81f7";
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+            ctx.fillStyle = "#2f81f7"; ctx.font = "12px sans-serif";
+            ctx.fillText(`${{m.name}} (${{m.movement}})`, a.x + 4, a.y - 6);
+          }});
+          if (pointA) {{
+            const a = imageToCanvas(pointA.x, pointA.y);
+            ctx.fillStyle = "#3fb950";
+            ctx.beginPath(); ctx.arc(a.x, a.y, 5, 0, Math.PI * 2); ctx.fill();
+          }}
+          if (pointA && pointB) {{
+            const a = imageToCanvas(pointA.x, pointA.y), b = imageToCanvas(pointB.x, pointB.y);
+            ctx.strokeStyle = "#3fb950"; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+            ctx.fillStyle = "#3fb950";
+            ctx.beginPath(); ctx.arc(b.x, b.y, 5, 0, Math.PI * 2); ctx.fill();
+          }}
+        }}
+
+        const img = new Image();
+        img.onload = () => {{ bgImg = img; imgW = img.naturalWidth; imgH = img.naturalHeight; redraw(); }};
+        img.src = `/api/intersections/${{siteId}}/schematic?t=${{Date.now()}}`;
+
+        canvas.addEventListener("click", (e) => {{
+          if (!bgImg) return;
+          const rect = canvas.getBoundingClientRect();
+          const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
+          const cy = (e.clientY - rect.top) * (canvas.height / rect.height);
+          const p = canvasToImage(cx, cy);
+          if (!pointA || (pointA && pointB)) {{ pointA = p; pointB = null; }}
+          else {{ pointB = p; }}
+          document.getElementById("schemCoords").textContent = pointA && pointB
+            ? `A(${{pointA.x}}, ${{pointA.y}}) -> B(${{pointB.x}}, ${{pointB.y}})`
+            : `A(${{pointA.x}}, ${{pointA.y}}) -> marca el punto B`;
+          document.getElementById("addMarkerBtn").disabled = !(pointA && pointB);
+          redraw();
+        }});
+
+        function resetMarkerDraw() {{
+          pointA = pointB = null;
+          document.getElementById("schemCoords").textContent = "Coordenadas: —";
+          document.getElementById("addMarkerBtn").disabled = true;
+          redraw();
+        }}
+
+        async function addMarker() {{
+          const name = document.getElementById("markerNameInput").value.trim();
+          const movement = document.getElementById("markerMovementInput").value;
+          if (!name || !pointA || !pointB) {{ alert("Falta el nombre o los dos puntos"); return; }}
+          const body = {{ name, movement, x1: pointA.x, y1: pointA.y, x2: pointB.x, y2: pointB.y }};
+          const resp = await fetch(`/api/intersections/${{siteId}}/marker`, {{
+            method: "POST", headers: {{ "Content-Type": "application/json" }}, body: JSON.stringify(body),
+          }});
+          if (resp.ok) {{ location.reload(); }}
+          else {{ alert("No se pudo agregar: " + (await resp.text())); }}
+        }}
+
+        async function deleteMarker(id) {{
+          if (!confirm("¿Borrar esta espira?")) return;
+          const resp = await fetch(`/api/intersections/marker/${{id}}`, {{ method: "DELETE" }});
+          if (resp.ok) {{ location.reload(); }}
+          else {{ alert("No se pudo borrar"); }}
+        }}
+      </script>
+        """
+
+    return page_shell(info["display_name"] or site_id, "intersections", body)

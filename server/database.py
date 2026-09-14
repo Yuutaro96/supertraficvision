@@ -96,6 +96,37 @@ class LineMirror(Base):
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 
+class Intersection(Base):
+    """Ficha de la intersección semaforizada (documentación, no datos de
+    tráfico): esquema de señalización + metadatos. Una fila por site_id."""
+    __tablename__ = "intersections"
+
+    site_id = Column(String, primary_key=True)
+    display_name = Column(String, nullable=True)
+    mts_code = Column(String, nullable=True)  # ej. MTS-LA-001
+    notes = Column(String, nullable=True)
+    schematic_image = Column(LargeBinary, nullable=True)
+    schematic_content_type = Column(String, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class IntersectionMarker(Base):
+    """Espira/línea de conteo marcada A MANO sobre la imagen del esquema
+    (coordenadas de píxel DEL ESQUEMA, no del video de la cámara — no hay
+    correspondencia geométrica automática entre ambos, ver CLAUDE.md)."""
+    __tablename__ = "intersection_markers"
+
+    id = Column(Integer, primary_key=True)
+    site_id = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    movement = Column(String, nullable=False)
+    x1 = Column(Integer, nullable=False)
+    y1 = Column(Integer, nullable=False)
+    x2 = Column(Integer, nullable=False)
+    y2 = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Count(Base):
     __tablename__ = "counts"
 
@@ -374,6 +405,119 @@ def get_line_mirror(site_id: str, camera_name: str = None) -> list:
             }
             for r in rows
         ]
+
+
+# ---------------------------------------------------------------------------
+# Catálogo de intersecciones: esquema de señalización + espiras marcadas a
+# mano sobre esa imagen (documentación, independiente de las líneas de
+# conteo reales que vive en camera_manager/lines_mirror).
+# ---------------------------------------------------------------------------
+def _intersection_dict(r: "Intersection") -> dict:
+    return {
+        "site_id": r.site_id,
+        "display_name": r.display_name,
+        "mts_code": r.mts_code,
+        "notes": r.notes,
+        "has_schematic": r.schematic_image is not None,
+        "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+    }
+
+
+def upsert_intersection(site_id: str, display_name: str = None,
+                         mts_code: str = None, notes: str = None) -> dict:
+    with SessionLocal() as session:
+        row = session.query(Intersection).filter_by(site_id=site_id).one_or_none()
+        if row is None:
+            row = Intersection(site_id=site_id)
+            session.add(row)
+        if display_name is not None:
+            row.display_name = display_name
+        if mts_code is not None:
+            row.mts_code = mts_code
+        if notes is not None:
+            row.notes = notes
+        row.updated_at = datetime.utcnow()
+        session.commit()
+        session.refresh(row)
+        return _intersection_dict(row)
+
+
+def get_intersection(site_id: str) -> Optional[dict]:
+    with SessionLocal() as session:
+        row = session.query(Intersection).filter_by(site_id=site_id).one_or_none()
+        return _intersection_dict(row) if row else None
+
+
+def get_intersections() -> list:
+    with SessionLocal() as session:
+        rows = session.query(Intersection).order_by(Intersection.site_id).all()
+        return [_intersection_dict(r) for r in rows]
+
+
+def save_intersection_schematic(site_id: str, image_bytes: bytes, content_type: str) -> dict:
+    with SessionLocal() as session:
+        row = session.query(Intersection).filter_by(site_id=site_id).one_or_none()
+        if row is None:
+            row = Intersection(site_id=site_id)
+            session.add(row)
+        row.schematic_image = image_bytes
+        row.schematic_content_type = content_type
+        row.updated_at = datetime.utcnow()
+        session.commit()
+        session.refresh(row)
+        return _intersection_dict(row)
+
+
+def get_intersection_schematic(site_id: str) -> Optional[tuple]:
+    """Devuelve (bytes, content_type) o None si no hay esquema subido."""
+    with SessionLocal() as session:
+        row = session.query(Intersection).filter_by(site_id=site_id).one_or_none()
+        if row is None or row.schematic_image is None:
+            return None
+        return row.schematic_image, row.schematic_content_type or "image/jpeg"
+
+
+def create_intersection_marker(site_id: str, name: str, movement: str,
+                                x1: int, y1: int, x2: int, y2: int) -> dict:
+    with SessionLocal() as session:
+        row = IntersectionMarker(
+            site_id=site_id, name=name, movement=movement,
+            x1=x1, y1=y1, x2=x2, y2=y2,
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return {
+            "id": row.id, "site_id": row.site_id, "name": row.name, "movement": row.movement,
+            "x1": row.x1, "y1": row.y1, "x2": row.x2, "y2": row.y2,
+        }
+
+
+def get_intersection_markers(site_id: str) -> list:
+    with SessionLocal() as session:
+        rows = (
+            session.query(IntersectionMarker)
+            .filter_by(site_id=site_id)
+            .order_by(IntersectionMarker.id)
+            .all()
+        )
+        return [
+            {
+                "id": r.id, "site_id": r.site_id, "name": r.name, "movement": r.movement,
+                "x1": r.x1, "y1": r.y1, "x2": r.x2, "y2": r.y2,
+            }
+            for r in rows
+        ]
+
+
+def delete_intersection_marker(marker_id: int) -> bool:
+    with SessionLocal() as session:
+        row = session.query(IntersectionMarker).filter_by(id=marker_id).one_or_none()
+        if row is None:
+            return False
+        session.delete(row)
+        session.commit()
+        return True
 
 
 def totals_by_class(site_id: str = None) -> dict:

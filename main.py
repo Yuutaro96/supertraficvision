@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from typing import Dict, List, Optional
 
 import cv2
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import (
     StreamingResponse, HTMLResponse, JSONResponse, Response, FileResponse,
 )
@@ -590,7 +590,77 @@ def get_meta():
         ],
         "movements": config.MOVEMENT_LABELS,
         "sync_enabled": bool(config.SYNC_SERVER_URL),
+        "intersection_url": (f"{config.SYNC_SERVER_URL}/intersections/{config.SYNC_SITE_ID}"
+                              if config.SYNC_SERVER_URL else None),
     }
+
+
+def _require_sync_configured():
+    if not config.SYNC_SERVER_URL:
+        raise HTTPException(status_code=400, detail="SYNC_SERVER_URL no configurado; no hay panel central conectado.")
+
+
+@app.get("/api/sync/intersection-info")
+def get_intersection_info():
+    """Trae los datos de la ficha de intersección desde el panel central,
+    para precargar el formulario local — no se guarda copia local."""
+    _require_sync_configured()
+    import requests
+    try:
+        resp = requests.get(
+            f"{config.SYNC_SERVER_URL}/api/intersections/{config.SYNC_SITE_ID}",
+            headers={"X-API-Key": config.SYNC_API_KEY},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo contactar al panel central: {exc}")
+
+
+@app.post("/api/sync/intersection-info")
+def update_intersection_info(payload: dict):
+    """Envía nombre/código/notas de la intersección al panel central."""
+    _require_sync_configured()
+    import requests
+    try:
+        resp = requests.post(
+            f"{config.SYNC_SERVER_URL}/api/intersections/{config.SYNC_SITE_ID}",
+            json={
+                "display_name": payload.get("display_name"),
+                "mts_code": payload.get("mts_code"),
+                "notes": payload.get("notes"),
+            },
+            headers={"X-API-Key": config.SYNC_API_KEY},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo contactar al panel central: {exc}")
+
+
+@app.post("/api/sync/upload-schematic")
+async def upload_intersection_schematic(image: UploadFile = File(...)):
+    """Sube el esquema de señalización directo al panel central (documento
+    subido una sola vez por un humano, no pasa por el ciclo de sync)."""
+    _require_sync_configured()
+    import requests
+    data = await image.read()
+    try:
+        resp = requests.post(
+            f"{config.SYNC_SERVER_URL}/api/intersections/{config.SYNC_SITE_ID}/schematic",
+            files={"image": (image.filename, data, image.content_type)},
+            headers={"X-API-Key": config.SYNC_API_KEY},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.HTTPError as exc:
+        detail = exc.response.text if exc.response is not None else str(exc)
+        raise HTTPException(status_code=exc.response.status_code if exc.response is not None else 502, detail=detail)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo contactar al panel central: {exc}")
 
 
 @app.post("/api/sync/reset-remote")

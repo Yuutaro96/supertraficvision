@@ -57,9 +57,63 @@ function initTabs() {
       // Refrescar datos al entrar a ciertas pestañas
       if (name === "db") loadDbStats();
       if (name === "sistema") refreshStatus();
+      if (name === "sync") loadSyncTab();
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// Pestaña Sincronización: ficha de intersección + esquema (panel central)
+// ---------------------------------------------------------------------------
+let _syncTabLoaded = false;
+
+async function loadSyncTab() {
+  const meta = await loadMeta();
+  document.getElementById("syncDisabledCard").classList.toggle("hidden", meta.sync_enabled);
+  document.getElementById("syncEnabledCard").classList.toggle("hidden", !meta.sync_enabled);
+  document.getElementById("syncSchematicCard").classList.toggle("hidden", !meta.sync_enabled);
+  if (!meta.sync_enabled || _syncTabLoaded) return;
+  _syncTabLoaded = true;
+
+  if (meta.intersection_url) {
+    document.getElementById("openIntersectionLink").href = meta.intersection_url;
+  }
+
+  try {
+    const info = await API.get("/api/sync/intersection-info");
+    document.getElementById("intDisplayName").value = info.display_name || "";
+    document.getElementById("intMtsCode").value = info.mts_code || "";
+    document.getElementById("intNotes").value = info.notes || "";
+  } catch (e) {
+    toast("No se pudo cargar la ficha desde el panel central: " + e.message, true);
+  }
+}
+
+async function saveIntersectionInfo() {
+  try {
+    await API.post("/api/sync/intersection-info", {
+      display_name: document.getElementById("intDisplayName").value.trim(),
+      mts_code: document.getElementById("intMtsCode").value.trim(),
+      notes: document.getElementById("intNotes").value.trim(),
+    });
+    toast("Datos guardados en el panel central");
+  } catch (e) { toast(e.message, true); }
+}
+
+async function uploadSchematic() {
+  const input = document.getElementById("schematicFileInput");
+  if (!input.files.length) { toast("Elige un archivo primero", true); return; }
+  const fd = new FormData();
+  fd.append("image", input.files[0]);
+  try {
+    const r = await fetch("/api/sync/upload-schematic", { method: "POST", body: fd });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+    toast("Esquema subido al panel central");
+  } catch (e) { toast(e.message, true); }
+}
+
+document.getElementById("saveIntInfoBtn").addEventListener("click", saveIntersectionInfo);
+document.getElementById("uploadSchematicBtn").addEventListener("click", uploadSchematic);
 
 // ---------------------------------------------------------------------------
 // Cargar configuración inicial
