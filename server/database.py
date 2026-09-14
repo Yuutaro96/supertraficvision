@@ -168,13 +168,19 @@ def _migrate_add_missing_columns():
 
 
 def upsert_camera_status(site_id: str, cameras: list) -> None:
+    """El mini PC manda en cada ingest la lista COMPLETA de cámaras que
+    tiene activas ahora mismo (nunca un subconjunto parcial) — se trata
+    como la verdad actual: se actualizan las que vienen, y se borran las
+    que ya no reporta (mismo criterio que upsert_line_mirror), para que
+    una cámara eliminada localmente no se quede fantasma en el panel."""
     with SessionLocal() as session:
+        reported_names = {cam["name"] for cam in cameras}
+        existing = {
+            row.name: row
+            for row in session.query(CameraStatus).filter_by(site_id=site_id).all()
+        }
         for cam in cameras:
-            row = (
-                session.query(CameraStatus)
-                .filter_by(site_id=site_id, name=cam["name"])
-                .one_or_none()
-            )
+            row = existing.get(cam["name"])
             if row is None:
                 row = CameraStatus(site_id=site_id, name=cam["name"])
                 session.add(row)
@@ -182,6 +188,9 @@ def upsert_camera_status(site_id: str, cameras: list) -> None:
             row.fps = float(cam.get("fps") or 0)
             row.last_error = cam.get("last_error") or ""
             row.updated_at = datetime.utcnow()
+        for name, row in existing.items():
+            if name not in reported_names:
+                session.delete(row)
         session.commit()
 
 
