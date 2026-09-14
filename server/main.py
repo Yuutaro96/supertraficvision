@@ -17,7 +17,6 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict, List, Optional
-from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
@@ -25,6 +24,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
 import database
+import templates
 
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
@@ -236,9 +236,11 @@ def get_line_mirror(site_id: str, _=Depends(require_login)):
     return database.get_line_mirror(site_id)
 
 
+
+
 @app.get("/api/export/csv")
-def export_csv(_=Depends(require_login)):
-    rows = database.get_all_counts()
+def export_csv(site_id: Optional[str] = None, _=Depends(require_login)):
+    rows = database.get_all_counts(site_id)
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["id", "sitio", "timestamp", "camara", "linea", "movimiento",
@@ -256,301 +258,58 @@ def export_csv(_=Depends(require_login)):
     )
 
 
+# ---------------------------------------------------------------------------
+# Reinicio manual de reportes (además de la purga automática por
+# RETENTION_DAYS) — botón en el panel, y también llamable directo desde el
+# mini PC (misma idea que en la app local: administración de datos propia).
+# ---------------------------------------------------------------------------
+@app.post("/api/admin/reset-counts")
+def admin_reset_counts(site_id: Optional[str] = None, _=Depends(require_login)):
+    removed = database.reset_counts(site_id)
+    return {"ok": True, "removed": removed}
+
+
+@app.post("/api/reset-counts")
+def edge_reset_counts(site_id: str, _=Depends(require_api_key)):
+    """Para que el mini PC pueda reiniciar SUS PROPIOS reportes centrales
+    directamente (ej. un botón en la app local), sin pasar por el panel
+    admin. Siempre requiere site_id explícito — nunca borra otros sitios."""
+    removed = database.reset_counts(site_id)
+    return {"ok": True, "removed": removed}
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(_=Depends(require_login)):
-    import json as _json
-
     cameras = database.get_camera_statuses()
     totals = database.totals_by_class()
+    return HTMLResponse(templates.dashboard_html(cameras, totals))
+
+
+@app.get("/reports", response_class=HTMLResponse)
+def reports_page(site_id: str = "", hours: int = 24, _=Depends(require_login)):
+    cameras = database.get_camera_statuses()
     site_ids = sorted({c["site_id"] for c in cameras})
-    mirror_by_site: Dict[str, list] = {sid: database.get_line_mirror(sid) for sid in site_ids}
+    by_hour = database.counts_by_hour(site_id or None, hours)
+    totals = database.totals_by_class(site_id or None)
+    recent = database.get_all_counts(site_id or None)[:100]
+    return HTMLResponse(templates.reports_html(site_ids, site_id, hours, by_hour, totals, recent))
 
-    def _snapshot_cell(c: dict) -> str:
-        site_q = quote(c["site_id"])
-        name_q = quote(c["name"])
-        if c["has_snapshot"]:
-            type_label = "con detecciones" if c.get("snapshot_image_type") == "annotated" else "cruda"
-            thumb = (
-                f"<a href='/api/snapshot/{site_q}/{name_q}' target='_blank'>"
-                f"<img class='thumb' src='/api/snapshot/{site_q}/{name_q}'></a>"
-                f"<div class='muted'>{type_label} · {c['snapshot_captured_at'] or ''}</div>"
-            )
-        else:
-            thumb = "<span class='muted'>Sin captura todavía</span>"
-        if c["snapshot_requested"]:
-            type_txt = "con detecciones" if c.get("requested_snapshot_type") == "annotated" else "cruda"
-            pending = f"<div class='muted'>⏳ Solicitada ({type_txt}), esperando al mini PC…</div>"
-        else:
-            pending = ""
-        return (
-            f"{thumb}{pending}"
-            f"<div class='btn-row'>"
-            f"<button class='snap-btn' onclick=\"requestSnapshot('{site_q}','{name_q}','raw')\">📷 Cruda</button>"
-            f"<button class='snap-btn' onclick=\"requestSnapshot('{site_q}','{name_q}','annotated')\">🎯 Con detecciones</button>"
-            f"</div>"
-        )
 
-    def _lines_cell(c: dict) -> str:
-        site_q = quote(c["site_id"])
-        name_q = quote(c["name"])
-        return f"<button class='snap-btn' onclick=\"openLinesEditor('{site_q}','{name_q}')\">✏️ Configurar líneas</button>"
-
-    cam_rows = "".join(
-        f"<tr><td>{c['site_id']}</td><td>{c['name']}</td>"
-        f"<td>{'🟢 Conectada' if c['connected'] else '🔴 Sin señal'}</td>"
-        f"<td>{c['fps']:.1f}</td><td>{c['updated_at'] or ''}</td>"
-        f"<td>{_snapshot_cell(c)}</td><td>{_lines_cell(c)}</td></tr>"
-        for c in cameras
-    ) or "<tr><td colspan='7'>Sin cámaras reportadas todavía.</td></tr>"
-
-    total_rows = "".join(
-        f"<tr><td>{cls}</td><td>{n}</td></tr>" for cls, n in sorted(totals.items())
-    ) or "<tr><td colspan='2'>Sin datos todavía.</td></tr>"
-
-    html = f"""
-    <!doctype html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <title>Aforo Visión - Panel Central</title>
-      <style>
-        body {{ font-family: system-ui, sans-serif; background: #0f1115; color: #e6edf3;
-               margin: 0; padding: 32px; }}
-        h1 {{ font-size: 20px; }}
-        h2 {{ font-size: 14px; text-transform: uppercase; letter-spacing: .05em;
-              color: #8b949e; margin-top: 32px; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 12px; }}
-        th, td {{ text-align: left; padding: 8px 10px; border-bottom: 1px solid #2b3444;
-                  font-size: 13px; }}
-        th {{ color: #8b949e; font-weight: 500; }}
-        a.button {{ display: inline-block; margin-top: 16px; padding: 10px 16px;
-                    background: #2f81f7; color: white; border-radius: 6px;
-                    text-decoration: none; font-weight: 600; }}
-        .thumb {{ max-width: 140px; max-height: 90px; display: block;
-                   border-radius: 4px; border: 1px solid #2b3444; }}
-        .muted {{ color: #8b949e; font-size: 11px; margin-top: 4px; }}
-        .snap-btn {{ margin-top: 6px; padding: 4px 10px; font-size: 12px;
-                      background: #21262d; color: #e6edf3; border: 1px solid #30363d;
-                      border-radius: 5px; cursor: pointer; }}
-        .snap-btn:hover {{ background: #30363d; }}
-        .btn-row {{ display: flex; gap: 6px; flex-wrap: wrap; }}
-        .overlay {{ position: fixed; inset: 0; background: rgba(0,0,0,0.6);
-                     display: none; align-items: center; justify-content: center; z-index: 1000; }}
-        .overlay.show {{ display: flex; }}
-        .modal {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px;
-                   padding: 20px; width: 640px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }}
-        .modal h3 {{ margin: 0 0 12px; font-size: 15px; }}
-        .modal canvas {{ width: 100%; max-width: 600px; background: #000; border-radius: 4px;
-                          cursor: crosshair; display: block; }}
-        .modal .field {{ margin-top: 10px; }}
-        .modal label {{ font-size: 12px; color: #8b949e; display: block; margin-bottom: 4px; }}
-        .modal input, .modal select {{ width: 100%; padding: 6px 8px; background: #0d1117;
-                                        color: #e6edf3; border: 1px solid #30363d; border-radius: 5px; }}
-        .modal-actions {{ margin-top: 12px; display: flex; gap: 8px; }}
-        .existing-lines {{ margin-top: 16px; border-top: 1px solid #2b3444; padding-top: 10px; }}
-        .existing-lines div {{ display: flex; justify-content: space-between; align-items: center;
-                                 padding: 4px 0; font-size: 12.5px; }}
-        .close-x {{ float: right; background: none; border: none; color: #8b949e; cursor: pointer; font-size: 16px; }}
-        .hidden {{ display: none !important; }}
-      </style>
-    </head>
-    <body>
-      <h1>Aforo Visión &middot; Panel Central</h1>
-
-      <h2>Estado de cámaras</h2>
-      <table>
-        <tr><th>Sitio</th><th>Cámara</th><th>Estado</th><th>FPS</th><th>Última actualización</th><th>Captura</th><th>Líneas</th></tr>
-        {cam_rows}
-      </table>
-
-      <h2>Totales acumulados (desde la última purga/descarga)</h2>
-      <table>
-        <tr><th>Clase</th><th>Total</th></tr>
-        {total_rows}
-      </table>
-
-      <a class="button" href="/api/export/csv">Descargar reporte (CSV)</a>
-
-      <div class="overlay" id="linesOverlay">
-        <div class="modal">
-          <button class="close-x" onclick="closeLinesEditor()">✕</button>
-          <h3 id="linesModalTitle">Configurar líneas</h3>
-          <p class="muted" id="linesNoImage">
-            Todavía no hay una captura de esta cámara para dibujar sobre ella —
-            pide una "📷 Cruda" en la fila de la cámara y vuelve a abrir este editor.
-          </p>
-          <canvas id="linesCanvas" width="600" height="340" class="hidden"></canvas>
-          <p class="muted" id="linesCoords">Coordenadas: —</p>
-          <div class="field">
-            <label>Nombre de la línea nueva</label>
-            <input id="lineNameInput" placeholder="Ej. Carril Norte">
-          </div>
-          <div class="field">
-            <label>Movimiento / Dirección</label>
-            <select id="lineMovementInput">
-              {"".join(f"<option value='{m}'>{m}</option>" for m in MOVEMENT_LABELS)}
-            </select>
-          </div>
-          <div class="modal-actions">
-            <button class="button" style="margin:0" id="sendLineBtn" onclick="sendLineCreate()" disabled>Enviar comando (crear)</button>
-            <button class="snap-btn" onclick="resetLineDraw()">Reiniciar dibujo</button>
-          </div>
-          <div class="existing-lines" id="existingLinesList"></div>
-        </div>
-      </div>
-
-      <script>
-        const LINE_MIRROR = {_json.dumps(mirror_by_site)};
-
-        async function requestSnapshot(siteId, cameraName, snapshotType) {{
-          const url = `/api/snapshot/request?site_id=${{siteId}}&camera_name=${{cameraName}}&snapshot_type=${{snapshotType}}`;
-          const resp = await fetch(url, {{ method: "POST" }});
-          if (resp.ok) {{
-            alert("Captura solicitada. El mini PC la envía en su próximo ciclo de sincronización (puede tardar unos minutos).");
-            location.reload();
-          }} else {{
-            alert("No se pudo solicitar la captura.");
-          }}
-        }}
-
-        let curSite = null, curCamera = null, imgW = 0, imgH = 0;
-        let pointA = null, pointB = null;
-        const canvas = document.getElementById("linesCanvas");
-        const ctx = canvas.getContext("2d");
-        let bgImg = null;
-
-        function scaleFactors() {{ return {{ sx: canvas.width / imgW, sy: canvas.height / imgH }}; }}
-        function canvasToImage(cx, cy) {{
-          const {{ sx, sy }} = scaleFactors();
-          return {{ x: Math.round(cx / sx), y: Math.round(cy / sy) }};
-        }}
-        function imageToCanvas(ix, iy) {{
-          const {{ sx, sy }} = scaleFactors();
-          return {{ x: ix * sx, y: iy * sy }};
-        }}
-
-        function redrawLinesCanvas() {{
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          if (bgImg) ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
-          const lines = (LINE_MIRROR[curSite] || []).filter(l => l.camera_name === curCamera);
-          ctx.lineWidth = 2;
-          lines.forEach(l => {{
-            const a = imageToCanvas(l.x1, l.y1), b = imageToCanvas(l.x2, l.y2);
-            ctx.strokeStyle = "#2f81f7";
-            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-            ctx.fillStyle = "#2f81f7"; ctx.font = "12px sans-serif";
-            ctx.fillText(`${{l.name}} (${{l.movement}})`, a.x + 4, a.y - 6);
-          }});
-          if (pointA) {{
-            const a = imageToCanvas(pointA.x, pointA.y);
-            ctx.fillStyle = "#3fb950";
-            ctx.beginPath(); ctx.arc(a.x, a.y, 5, 0, Math.PI * 2); ctx.fill();
-          }}
-          if (pointA && pointB) {{
-            const a = imageToCanvas(pointA.x, pointA.y), b = imageToCanvas(pointB.x, pointB.y);
-            ctx.strokeStyle = "#3fb950";
-            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-            ctx.fillStyle = "#3fb950";
-            ctx.beginPath(); ctx.arc(b.x, b.y, 5, 0, Math.PI * 2); ctx.fill();
-          }}
-        }}
-
-        function renderExistingLines() {{
-          const lines = (LINE_MIRROR[curSite] || []).filter(l => l.camera_name === curCamera);
-          const box = document.getElementById("existingLinesList");
-          if (lines.length === 0) {{
-            box.innerHTML = "<p class='muted'>Sin líneas configuradas en esta cámara.</p>";
-            return;
-          }}
-          box.innerHTML = "<p class='muted' style='margin:0 0 6px'>Líneas ya configuradas (editar = borrar y crear de nuevo):</p>" +
-            lines.map(l => `<div><span>${{l.name}} — ${{l.movement}}</span>
-              <button class="snap-btn" onclick="sendLineDelete(${{l.line_id}})">🗑 Borrar</button></div>`).join("");
-        }}
-
-        function openLinesEditor(siteId, cameraName) {{
-          curSite = siteId; curCamera = cameraName;
-          pointA = pointB = null;
-          document.getElementById("linesModalTitle").textContent = `Configurar líneas · ${{cameraName}} (${{siteId}})`;
-          document.getElementById("lineNameInput").value = "";
-          document.getElementById("sendLineBtn").disabled = true;
-          document.getElementById("linesCoords").textContent = "Coordenadas: —";
-          renderExistingLines();
-
-          const img = new Image();
-          img.onload = () => {{
-            bgImg = img; imgW = img.naturalWidth; imgH = img.naturalHeight;
-            canvas.classList.remove("hidden");
-            document.getElementById("linesNoImage").classList.add("hidden");
-            redrawLinesCanvas();
-          }};
-          img.onerror = () => {{
-            bgImg = null;
-            canvas.classList.add("hidden");
-            document.getElementById("linesNoImage").classList.remove("hidden");
-          }};
-          img.src = `/api/snapshot/${{siteId}}/${{cameraName}}?t=${{Date.now()}}`;
-          document.getElementById("linesOverlay").classList.add("show");
-        }}
-
-        function closeLinesEditor() {{
-          document.getElementById("linesOverlay").classList.remove("show");
-        }}
-
-        function resetLineDraw() {{
-          pointA = pointB = null;
-          document.getElementById("linesCoords").textContent = "Coordenadas: —";
-          document.getElementById("sendLineBtn").disabled = true;
-          redrawLinesCanvas();
-        }}
-
-        canvas.addEventListener("click", (e) => {{
-          if (!bgImg) return;
-          const rect = canvas.getBoundingClientRect();
-          const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
-          const cy = (e.clientY - rect.top) * (canvas.height / rect.height);
-          const p = canvasToImage(cx, cy);
-          if (!pointA || (pointA && pointB)) {{ pointA = p; pointB = null; }}
-          else {{ pointB = p; }}
-          document.getElementById("linesCoords").textContent = pointA && pointB
-            ? `A(${{pointA.x}}, ${{pointA.y}}) -> B(${{pointB.x}}, ${{pointB.y}})`
-            : `A(${{pointA.x}}, ${{pointA.y}}) -> marca el punto B`;
-          document.getElementById("sendLineBtn").disabled = !(pointA && pointB);
-          redrawLinesCanvas();
-        }});
-
-        async function sendLineCreate() {{
-          const name = document.getElementById("lineNameInput").value.trim();
-          const movement = document.getElementById("lineMovementInput").value;
-          if (!name || !pointA || !pointB) {{ alert("Falta el nombre o los dos puntos de la línea"); return; }}
-          const body = {{
-            camera_name: curCamera, command_type: "create", name, movement,
-            x1: pointA.x, y1: pointA.y, x2: pointB.x, y2: pointB.y,
-          }};
-          const resp = await fetch(`/api/lines/command?site_id=${{curSite}}`, {{
-            method: "POST", headers: {{ "Content-Type": "application/json" }}, body: JSON.stringify(body),
-          }});
-          if (resp.ok) {{
-            alert("Comando encolado. Se aplica en el próximo ciclo de sync del mini PC.");
-            closeLinesEditor();
-          }} else {{
-            alert("No se pudo encolar el comando: " + (await resp.text()));
-          }}
-        }}
-
-        async function sendLineDelete(lineId) {{
-          if (!confirm("¿Borrar esta línea? Se aplica en el próximo ciclo de sync del mini PC.")) return;
-          const body = {{ camera_name: curCamera, command_type: "delete", line_id: lineId }};
-          const resp = await fetch(`/api/lines/command?site_id=${{curSite}}`, {{
-            method: "POST", headers: {{ "Content-Type": "application/json" }}, body: JSON.stringify(body),
-          }});
-          if (resp.ok) {{
-            alert("Comando de borrado encolado.");
-          }} else {{
-            alert("No se pudo encolar el comando: " + (await resp.text()));
-          }}
-        }}
-      </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(html)
+@app.get("/lines", response_class=HTMLResponse)
+def lines_page(site_id: str = "", camera_name: str = "", _=Depends(require_login)):
+    cameras = database.get_camera_statuses()
+    site_ids = sorted({c["site_id"] for c in cameras})
+    if not site_id and site_ids:
+        site_id = site_ids[0]
+    cameras_by_site: Dict[str, list] = {}
+    for c in cameras:
+        cameras_by_site.setdefault(c["site_id"], []).append(c["name"])
+    cam_names = cameras_by_site.get(site_id, [])
+    if not camera_name and cam_names:
+        camera_name = cam_names[0]
+    mirror_lines = database.get_line_mirror(site_id) if site_id else []
+    recent_commands = database.get_line_commands(site_id) if site_id else []
+    return HTMLResponse(templates.lines_html(
+        site_ids, cameras_by_site, site_id, camera_name,
+        mirror_lines, MOVEMENT_LABELS, recent_commands,
+    ))

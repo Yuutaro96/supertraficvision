@@ -376,18 +376,55 @@ def get_line_mirror(site_id: str, camera_name: str = None) -> list:
         ]
 
 
-def totals_by_class() -> dict:
+def totals_by_class(site_id: str = None) -> dict:
     with SessionLocal() as session:
-        rows = session.query(Count).all()
+        q = session.query(Count)
+        if site_id:
+            q = q.filter_by(site_id=site_id)
         totals: dict = {}
-        for r in rows:
+        for r in q.all():
             totals[r.class_name] = totals.get(r.class_name, 0) + r.count
         return totals
 
 
-def get_all_counts() -> list:
+def counts_by_hour(site_id: str = None, hours: int = 24) -> list:
+    """Resumen agrupado por hora y clase, para la gráfica de Reportes."""
     with SessionLocal() as session:
-        rows = session.query(Count).order_by(Count.timestamp.desc()).all()
+        q = session.query(Count)
+        if site_id:
+            q = q.filter_by(site_id=site_id)
+        cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+        q = q.filter(Count.timestamp >= cutoff)
+        buckets: dict = {}
+        for r in q.all():
+            hour = (r.timestamp or "")[:13]  # "YYYY-MM-DDTHH"
+            key = (hour, r.class_name)
+            buckets[key] = buckets.get(key, 0) + r.count
+        return [
+            {"hour": hour, "class_name": cls, "total": total}
+            for (hour, cls), total in sorted(buckets.items())
+        ]
+
+
+def reset_counts(site_id: str = None) -> int:
+    """Borra los conteos acumulados (reinicio manual de Reportes), en vez
+    de esperar a la purga automática por RETENTION_DAYS. Si se pasa
+    site_id, solo reinicia ese sitio; si no, reinicia todos."""
+    with SessionLocal() as session:
+        q = session.query(Count)
+        if site_id:
+            q = q.filter_by(site_id=site_id)
+        removed = q.delete(synchronize_session=False)
+        session.commit()
+        return removed
+
+
+def get_all_counts(site_id: str = None) -> list:
+    with SessionLocal() as session:
+        q = session.query(Count)
+        if site_id:
+            q = q.filter_by(site_id=site_id)
+        rows = q.order_by(Count.timestamp.desc()).all()
         return [
             {
                 "id": r.id,

@@ -589,7 +589,30 @@ def get_meta():
             for cid, info in config.VEHICLE_CLASSES.items()
         ],
         "movements": config.MOVEMENT_LABELS,
+        "sync_enabled": bool(config.SYNC_SERVER_URL),
     }
+
+
+@app.post("/api/sync/reset-remote")
+def reset_remote_reports():
+    """Reinicia los reportes acumulados de ESTE sitio en el panel central
+    (Railway), llamado directamente desde la app local — no pasa por el
+    ciclo normal de sync porque es una acción deliberada de un humano, no
+    algo que necesite reintentos automáticos."""
+    if not config.SYNC_SERVER_URL:
+        raise HTTPException(status_code=400, detail="SYNC_SERVER_URL no configurado; no hay panel central conectado.")
+    import requests
+    try:
+        resp = requests.post(
+            f"{config.SYNC_SERVER_URL}/api/reset-counts",
+            params={"site_id": config.SYNC_SITE_ID},
+            headers={"X-API-Key": config.SYNC_API_KEY},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudo contactar al panel central: {exc}")
 
 
 # ---------------------------------------------------------------------------

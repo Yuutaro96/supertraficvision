@@ -108,10 +108,21 @@ function exportCsv() {
   window.location = "/api/counts/export/csv?" + params.toString();
 }
 
+async function resetRemoteReports() {
+  if (!confirm("¿Reiniciar los reportes acumulados de este sitio en el panel central (Railway)? Esto no borra los datos locales, solo los del panel en la nube.")) return;
+  try {
+    const result = await API.post("/api/sync/reset-remote", {});
+    toast(`Reportes centrales reiniciados (${result.removed} registros eliminados).`);
+  } catch (e) { toast(e.message, true); }
+}
+
 document.getElementById("applyFilter").addEventListener("click", loadReport);
 document.getElementById("exportCsv").addEventListener("click", exportCsv);
+document.getElementById("resetRemote").addEventListener("click", resetRemoteReports);
 
 (async function init() {
   await loadFilters();
   await loadReport();
+  const meta = await loadMeta();
+  document.getElementById("resetRemote").classList.toggle("hidden", !meta.sync_enabled);
 })();
