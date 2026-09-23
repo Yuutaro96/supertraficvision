@@ -71,12 +71,20 @@ class LineIn(BaseModel):
     x2: int
     y2: int
     movement: str = "RECTO"
+    count_side: str = "AMBOS"
 
     @field_validator("movement")
     @classmethod
     def _validate_movement(cls, v):
         if v not in config.MOVEMENT_LABELS:
             raise ValueError(f"movement debe ser uno de: {', '.join(config.MOVEMENT_LABELS)}")
+        return v
+
+    @field_validator("count_side")
+    @classmethod
+    def _validate_count_side(cls, v):
+        if v not in config.COUNT_SIDES:
+            raise ValueError(f"count_side debe ser uno de: {', '.join(config.COUNT_SIDES)}")
         return v
 
 
@@ -87,12 +95,20 @@ class LineUpdate(BaseModel):
     x2: Optional[int] = None
     y2: Optional[int] = None
     movement: Optional[str] = None
+    count_side: Optional[str] = None
 
     @field_validator("movement")
     @classmethod
     def _validate_movement(cls, v):
         if v is not None and v not in config.MOVEMENT_LABELS:
             raise ValueError(f"movement debe ser uno de: {', '.join(config.MOVEMENT_LABELS)}")
+        return v
+
+    @field_validator("count_side")
+    @classmethod
+    def _validate_count_side(cls, v):
+        if v is not None and v not in config.COUNT_SIDES:
+            raise ValueError(f"count_side debe ser uno de: {', '.join(config.COUNT_SIDES)}")
         return v
 
 
@@ -377,7 +393,8 @@ def list_lines(camera_id: int):
 @app.post("/api/lines")
 def create_line(line: LineIn):
     created = database.create_line(
-        line.camera_id, line.name, line.x1, line.y1, line.x2, line.y2, line.movement
+        line.camera_id, line.name, line.x1, line.y1, line.x2, line.y2,
+        line.movement, line.count_side,
     )
     manager.reload_lines(line.camera_id)
     return created
@@ -388,6 +405,7 @@ def update_line(line_id: int, line: LineUpdate):
     updated = database.update_line(
         line_id, name=line.name, x1=line.x1, y1=line.y1,
         x2=line.x2, y2=line.y2, movement=line.movement,
+        count_side=line.count_side,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Línea no encontrada")
@@ -589,6 +607,7 @@ def get_meta():
             for cid, info in config.VEHICLE_CLASSES.items()
         ],
         "movements": config.MOVEMENT_LABELS,
+        "count_sides": config.COUNT_SIDES,
         "sync_enabled": bool(config.SYNC_SERVER_URL),
         "intersection_url": (f"{config.SYNC_SERVER_URL}/intersections/{config.SYNC_SITE_ID}"
                               if config.SYNC_SERVER_URL else None),

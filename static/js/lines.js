@@ -148,10 +148,15 @@ async function loadCamsSelect() {
   if (cams.length) { currentCam = parseInt(sel.value); await loadLines(); }
 }
 
+const COUNT_SIDE_LABELS = { AMBOS: "Ambos lados", IN: "Solo IN", OUT: "Solo OUT" };
+
 async function loadMovements() {
   await loadMeta();
   const sel = document.getElementById("lineMovement");
   sel.innerHTML = META.movements.map((m) => `<option value="${m}">${m}</option>`).join("");
+  const sideSel = document.getElementById("lineCountSide");
+  sideSel.innerHTML = META.count_sides
+    .map((s) => `<option value="${s}">${COUNT_SIDE_LABELS[s] || s}</option>`).join("");
 }
 
 async function loadFrame() {
@@ -232,6 +237,7 @@ function renderLineTable() {
     `<tr>
       <td>${escapeHtml(l.name)}</td>
       <td>${escapeHtml(l.movement)}</td>
+      <td class="muted">${COUNT_SIDE_LABELS[l.count_side] || l.count_side || "Ambos lados"}</td>
       <td class="muted">${l.x1},${l.y1} → ${l.x2},${l.y2}</td>
       <td class="right"><button class="btn sm red" onclick="delLine(${l.id})">Eliminar</button></td>
     </tr>`
@@ -242,11 +248,12 @@ async function saveLine() {
   if (!currentCam || !pointA || !pointB) return;
   const name = document.getElementById("lineName").value.trim();
   const movement = document.getElementById("lineMovement").value;
+  const count_side = document.getElementById("lineCountSide").value;
   if (!name) { toast("Ingresa un nombre para la línea", true); return; }
   try {
     await API.post("/api/lines", {
       camera_id: currentCam, name,
-      x1: pointA.x, y1: pointA.y, x2: pointB.x, y2: pointB.y, movement,
+      x1: pointA.x, y1: pointA.y, x2: pointB.x, y2: pointB.y, movement, count_side,
     });
     toast("Línea guardada");
     pointA = pointB = null;

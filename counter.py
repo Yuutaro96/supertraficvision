@@ -38,6 +38,10 @@ class LineZoneWrapper:
         self.id = line_row["id"]
         self.name = line_row["name"]
         self.movement = line_row["movement"]
+        # AMBOS (por defecto) | IN | OUT: qué sentido de cruce se persiste.
+        # El otro sentido se sigue detectando (in_count/out_count del zone
+        # siguen incrementando) pero no se guarda en la base ni se emite.
+        self.count_side = line_row.get("count_side") or "AMBOS"
         self.x1, self.y1 = line_row["x1"], line_row["y1"]
         self.x2, self.y2 = line_row["x2"], line_row["y2"]
         start = sv.Point(self.x1, self.y1)
@@ -56,6 +60,7 @@ class LineZoneWrapper:
             "id": self.id,
             "name": self.name,
             "movement": self.movement,
+            "count_side": self.count_side,
             "in_count": self.zone.in_count,
             "out_count": self.zone.out_count,
         }
@@ -88,7 +93,13 @@ class LineCounter:
             unchanged = w is not None and (
                 w.name, w.movement, w.x1, w.y1, w.x2, w.y2
             ) == (r["name"], r["movement"], r["x1"], r["y1"], r["x2"], r["y2"])
-            new_lines.append(w if unchanged else LineZoneWrapper(r))
+            if unchanged:
+                # count_side no afecta la geometría del zone: se refresca en
+                # el wrapper existente sin resetear sus contadores en vivo.
+                w.count_side = r.get("count_side") or "AMBOS"
+                new_lines.append(w)
+            else:
+                new_lines.append(LineZoneWrapper(r))
         self.lines = new_lines
 
     def reload_if_changed(self):
@@ -137,9 +148,11 @@ class LineCounter:
                 print(f"[counter] Error en trigger de línea {wrapper.id}: {exc}")
                 continue
 
-            # Registrar cruces IN
+            # Registrar cruces, filtrando por el sentido configurado en la línea
             for mask, direction in ((crossed_in, "IN"), (crossed_out, "OUT")):
                 if mask is None:
+                    continue
+                if wrapper.count_side != "AMBOS" and wrapper.count_side != direction:
                     continue
                 idxs = np.where(mask)[0]
                 for i in idxs:

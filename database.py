@@ -55,6 +55,7 @@ def init_db() -> None:
                 x2          INTEGER NOT NULL,
                 y2          INTEGER NOT NULL,
                 movement    TEXT NOT NULL DEFAULT 'RECTO',
+                count_side  TEXT NOT NULL DEFAULT 'AMBOS',
                 created_at  TEXT NOT NULL,
                 FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE
             );
@@ -94,6 +95,7 @@ def init_db() -> None:
             "ALTER TABLE cameras ADD COLUMN ptz_capable INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE cameras ADD COLUMN control_protocol TEXT NOT NULL DEFAULT 'none'",
             "ALTER TABLE cameras ADD COLUMN control_config TEXT",
+            "ALTER TABLE lines ADD COLUMN count_side TEXT NOT NULL DEFAULT 'AMBOS'",
         ):
             try:
                 conn.execute(ddl)
@@ -279,12 +281,12 @@ def get_line(line_id: int) -> Optional[Dict]:
 
 
 def create_line(camera_id: int, name: str, x1: int, y1: int, x2: int, y2: int,
-                movement: str = "RECTO") -> Dict:
+                movement: str = "RECTO", count_side: str = "AMBOS") -> Dict:
     with _lock, _connect() as conn:
         cur = conn.execute(
-            "INSERT INTO lines(camera_id, name, x1, y1, x2, y2, movement, created_at) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-            (camera_id, name, x1, y1, x2, y2, movement, datetime.now().isoformat()),
+            "INSERT INTO lines(camera_id, name, x1, y1, x2, y2, movement, count_side, created_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (camera_id, name, x1, y1, x2, y2, movement, count_side, datetime.now().isoformat()),
         )
         conn.commit()
         lid = cur.lastrowid
@@ -296,13 +298,13 @@ def update_line(line_id: int, **kwargs) -> Optional[Dict]:
     if not line:
         return None
     fields = {}
-    for key in ("name", "x1", "y1", "x2", "y2", "movement"):
+    for key in ("name", "x1", "y1", "x2", "y2", "movement", "count_side"):
         fields[key] = kwargs[key] if kwargs.get(key) is not None else line[key]
     with _lock, _connect() as conn:
         conn.execute(
-            "UPDATE lines SET name=?, x1=?, y1=?, x2=?, y2=?, movement=? WHERE id=?",
+            "UPDATE lines SET name=?, x1=?, y1=?, x2=?, y2=?, movement=?, count_side=? WHERE id=?",
             (fields["name"], fields["x1"], fields["y1"], fields["x2"],
-             fields["y2"], fields["movement"], line_id),
+             fields["y2"], fields["movement"], fields["count_side"], line_id),
         )
         conn.commit()
     return get_line(line_id)

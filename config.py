@@ -57,6 +57,14 @@ MOVEMENT_LABELS = [
     "SALIDA",
 ]
 
+# ---------------------------------------------------------------------------
+# Qué lado(s) de una línea se registran como cruce válido.
+# AMBOS: comportamiento original (cuenta IN y OUT).
+# IN/OUT: solo se registra (y emite por WebSocket) ese sentido de cruce;
+# el otro sentido se sigue detectando internamente pero no se persiste.
+# ---------------------------------------------------------------------------
+COUNT_SIDES = ["AMBOS", "IN", "OUT"]
+
 
 # ---------------------------------------------------------------------------
 # Configuración global (valores por defecto)

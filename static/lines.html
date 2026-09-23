@@ -53,6 +53,10 @@
             <label>Movimiento / Dirección</label>
             <select id="lineMovement"></select>
           </div>
+          <div class="field">
+            <label>Registrar cruces</label>
+            <select id="lineCountSide"></select>
+          </div>
           <button class="btn green" id="saveLine" disabled>Guardar línea</button>
           <button class="btn gray" id="resetDraw">Reiniciar dibujo</button>
         </div>
@@ -63,12 +67,13 @@
           <button class="btn red" id="clearRoi">Borrar ROI</button>
         </div>
         <p class="muted" id="coords" style="font-size:12px">Coordenadas: —</p>
+        <p class="muted small" style="margin:4px 0 0">💡 Si eliges "Solo IN" o "Solo OUT" y no sabes cuál corresponde al sentido real: guarda primero en "Ambos", cruza un vehículo en el sentido que te interesa y mira en el Dashboard cuál contador (IN u OUT) subió; luego edita la línea y selecciona ese.</p>
       </div>
 
       <div class="card">
         <h2>Líneas configuradas</h2>
         <table>
-          <thead><tr><th>Nombre</th><th>Movimiento</th><th>Coords</th><th class="right">Acción</th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Movimiento</th><th>Cruces</th><th>Coords</th><th class="right">Acción</th></tr></thead>
           <tbody id="lineTable"></tbody>
         </table>
       </div>
