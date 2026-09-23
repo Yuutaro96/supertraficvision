@@ -8,6 +8,7 @@ let frameImg = null;      // Image() cargada
 let imgW = 0, imgH = 0;   // dimensiones reales del frame
 let pointA = null, pointB = null; // en coordenadas de imagen
 let existingLines = [];
+let editingLineId = null; // id de la línea en edición, o null si es nueva
 
 let mode = "line";        // "line" | "roi"
 let existingRoi = [];     // puntos guardados en el servidor
@@ -239,9 +240,34 @@ function renderLineTable() {
       <td>${escapeHtml(l.movement)}</td>
       <td class="muted">${COUNT_SIDE_LABELS[l.count_side] || l.count_side || "Ambos lados"}</td>
       <td class="muted">${l.x1},${l.y1} → ${l.x2},${l.y2}</td>
-      <td class="right"><button class="btn sm red" onclick="delLine(${l.id})">Eliminar</button></td>
+      <td class="right">
+        <button class="btn sm" onclick="startEditLine(${l.id})">Editar</button>
+        <button class="btn sm red" onclick="delLine(${l.id})">Eliminar</button>
+      </td>
     </tr>`
   ).join("");
+}
+
+function startEditLine(id) {
+  const line = existingLines.find((l) => l.id === id);
+  if (!line) return;
+  if (mode !== "line") setMode("line");
+  editingLineId = id;
+  pointA = { x: line.x1, y: line.y1 };
+  pointB = { x: line.x2, y: line.y2 };
+  document.getElementById("lineName").value = line.name;
+  document.getElementById("lineMovement").value = line.movement;
+  document.getElementById("lineCountSide").value = line.count_side || "AMBOS";
+  document.getElementById("saveLine").textContent = "Guardar cambios";
+  document.getElementById("resetDraw").textContent = "Cancelar edición";
+  updateCoords();
+  redraw();
+}
+
+function exitEditMode() {
+  editingLineId = null;
+  document.getElementById("saveLine").textContent = "Guardar línea";
+  document.getElementById("resetDraw").textContent = "Reiniciar dibujo";
 }
 
 async function saveLine() {
@@ -251,11 +277,19 @@ async function saveLine() {
   const count_side = document.getElementById("lineCountSide").value;
   if (!name) { toast("Ingresa un nombre para la línea", true); return; }
   try {
-    await API.post("/api/lines", {
-      camera_id: currentCam, name,
-      x1: pointA.x, y1: pointA.y, x2: pointB.x, y2: pointB.y, movement, count_side,
-    });
-    toast("Línea guardada");
+    if (editingLineId) {
+      await API.put(`/api/lines/${editingLineId}`, {
+        name, x1: pointA.x, y1: pointA.y, x2: pointB.x, y2: pointB.y, movement, count_side,
+      });
+      toast("Línea actualizada");
+    } else {
+      await API.post("/api/lines", {
+        camera_id: currentCam, name,
+        x1: pointA.x, y1: pointA.y, x2: pointB.x, y2: pointB.y, movement, count_side,
+      });
+      toast("Línea guardada");
+    }
+    exitEditMode();
     pointA = pointB = null;
     document.getElementById("lineName").value = "";
     updateCoords();
@@ -282,7 +316,10 @@ document.getElementById("camSelect").addEventListener("change", async (e) => {
 document.getElementById("loadFrame").addEventListener("click", loadFrame);
 document.getElementById("saveLine").addEventListener("click", saveLine);
 document.getElementById("resetDraw").addEventListener("click", () => {
-  pointA = pointB = null; updateCoords(); redraw();
+  exitEditMode();
+  pointA = pointB = null;
+  document.getElementById("lineName").value = "";
+  updateCoords(); redraw();
 });
 
 document.getElementById("modeGroup").querySelectorAll(".opt-btn").forEach((b) => {
