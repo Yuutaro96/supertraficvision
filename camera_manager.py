@@ -337,7 +337,16 @@ class CameraStream:
         for wrapper in self.line_counter.lines:
             p1, p2 = (wrapper.x1, wrapper.y1), (wrapper.x2, wrapper.y2)
             cv2.line(frame, p1, p2, color, 2, cv2.LINE_AA)
-            cv2.putText(frame, f"{wrapper.name} ({wrapper.movement})",
+            # Contador: el que corresponde al sentido que realmente se
+            # persiste (count_side), para que coincida con lo que se ve en
+            # reportes en vez de mostrar cruces en reversa que se descartan.
+            if wrapper.count_side == "IN":
+                count = wrapper.zone.in_count
+            elif wrapper.count_side == "OUT":
+                count = wrapper.zone.out_count
+            else:
+                count = wrapper.zone.in_count + wrapper.zone.out_count
+            cv2.putText(frame, f"{wrapper.name} ({wrapper.movement}) · {count}",
                         (p1[0] + 4, p1[1] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.42,
                         color, 1, cv2.LINE_AA)
             arrow = self._side_arrow(*p1, *p2, wrapper.count_side)

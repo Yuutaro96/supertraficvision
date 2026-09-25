@@ -286,6 +286,7 @@ async function loadCamsSelect() {
   sel.innerHTML = cams.map((c) => `<option value="${c.id}">${escapeHtml(c.name)} (#${c.id})</option>`).join("");
   if (cams.length) {
     currentCam = parseInt(sel.value);
+    loadCachedFrameFor(currentCam);
     await loadLines();
     await loadPairs();
   }
@@ -304,17 +305,53 @@ async function loadMovements() {
     META.movements.map((m) => `<option value="${m}">${m}</option>`).join("");
 }
 
+// El frame de referencia se guarda en localStorage (por cámara) para no
+// perderlo cada vez que se entra a /lines o se cambia de cámara: no hace
+// falta que la cámara esté conectada en ese momento para poder seguir
+// editando sus líneas sobre la última imagen vista.
+const FRAME_CACHE_PREFIX = "linesFrameCache_";
+
+function cacheFrame(camId, img) {
+  try {
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    c.getContext("2d").drawImage(img, 0, 0);
+    localStorage.setItem(FRAME_CACHE_PREFIX + camId, c.toDataURL("image/jpeg", 0.75));
+  } catch (e) { /* localStorage lleno o bloqueado: no es crítico, se sigue sin cache */ }
+}
+
+function getCachedFrame(camId) {
+  try {
+    return localStorage.getItem(FRAME_CACHE_PREFIX + camId);
+  } catch (e) { return null; }
+}
+
+function applyFrameImage(img) {
+  frameImg = img;
+  imgW = img.naturalWidth;
+  imgH = img.naturalHeight;
+  // Ajustar el canvas a proporción de la imagen (ancho fijo 800)
+  canvas.width = 800;
+  canvas.height = Math.round(800 * imgH / imgW);
+  redraw();
+}
+
+// Carga silenciosa desde cache (sin pedirle nada a la cámara). Se usa al
+// entrar a la página o cambiar de cámara, para mostrar algo de inmediato.
+function loadCachedFrameFor(camId) {
+  const cached = getCachedFrame(camId);
+  if (!cached) return;
+  const img = new Image();
+  img.onload = () => applyFrameImage(img);
+  img.src = cached;
+}
+
 async function loadFrame() {
   if (!currentCam) return;
   const img = new Image();
   img.onload = () => {
-    frameImg = img;
-    imgW = img.naturalWidth;
-    imgH = img.naturalHeight;
-    // Ajustar el canvas a proporción de la imagen (ancho fijo 800)
-    canvas.width = 800;
-    canvas.height = Math.round(800 * imgH / imgW);
-    redraw();
+    applyFrameImage(img);
+    cacheFrame(currentCam, img);
     toast("Frame cargado");
   };
   img.onerror = () => toast("No se pudo obtener el frame (¿cámara conectada?)", true);
@@ -527,6 +564,7 @@ document.getElementById("camSelect").addEventListener("change", async (e) => {
   currentCam = parseInt(e.target.value);
   frameImg = null; pointA = pointB = null; roiPoints = [];
   updateCoords();
+  loadCachedFrameFor(currentCam);
   await loadLines();
   await loadRoi();
   await loadPairs();
