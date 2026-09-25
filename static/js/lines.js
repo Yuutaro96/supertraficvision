@@ -28,6 +28,74 @@ function imageToCanvas(ix, iy) {
   return { x: ix * sx, y: iy * sy };
 }
 
+// Distancia (offset) y largo de las flechas de sentido, en px de canvas.
+const ARROW_OFFSET = 24;
+const ARROW_LEN = 20;
+const ARROW_HIT_RADIUS = 14;
+
+// Dadas las coordenadas de imagen de una línea, calcula los dos puntos donde
+// se dibujan las flechas de sentido (una a cada lado, perpendicular a la
+// línea) y cuál de los dos corresponde a "IN" y cuál a "OUT" según la MISMA
+// fórmula de producto cruzado que usa sv.LineZone (counter.py) para decidir
+// el sentido de cruce. Todo se calcula en coordenadas de canvas: como
+// imageToCanvas es un escalado uniforme y positivo (sx === sy siempre, ver
+// scaleFactors), el signo del producto cruzado no cambia respecto a hacerlo
+// en coordenadas de imagen.
+function sideArrows(pA, pB) {
+  const a = imageToCanvas(pA.x, pA.y), b = imageToCanvas(pB.x, pB.y);
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len, ny = dx / len; // perpendicular unitario (un lado)
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  return [
+    { nx, ny },
+    { nx: -nx, ny: -ny },
+  ].map(({ nx, ny }) => {
+    const base = { x: mid.x + nx * ARROW_OFFSET, y: mid.y + ny * ARROW_OFFSET };
+    const tip = { x: mid.x + nx * (ARROW_OFFSET + ARROW_LEN), y: mid.y + ny * (ARROW_OFFSET + ARROW_LEN) };
+    // Misma fórmula que counter.py/sv.LineZone: cross < 0 => lado "IN".
+    const cross = dx * (tip.y - a.y) - dy * (tip.x - a.x);
+    return { side: cross < 0 ? "IN" : "OUT", base, tip };
+  });
+}
+
+function drawArrowHead(base, tip, color) {
+  const angle = Math.atan2(tip.y - base.y, tip.x - base.x);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(tip.x, tip.y); ctx.stroke();
+  const headLen = 8;
+  ctx.beginPath();
+  ctx.moveTo(tip.x, tip.y);
+  ctx.lineTo(tip.x - headLen * Math.cos(angle - Math.PI / 6), tip.y - headLen * Math.sin(angle - Math.PI / 6));
+  ctx.lineTo(tip.x - headLen * Math.cos(angle + Math.PI / 6), tip.y - headLen * Math.sin(angle + Math.PI / 6));
+  ctx.closePath();
+  ctx.fill();
+}
+
+// Flechas interactivas de la línea en edición: clickeables para asignar
+// count_side directamente sobre el video, sin adivinar IN/OUT.
+function drawInteractiveArrows(pA, pB) {
+  const current = document.getElementById("lineCountSide").value;
+  sideArrows(pA, pB).forEach(({ side, base, tip }) => {
+    const selected = current === side;
+    const color = selected ? "#3fb950" : "#e3b341";
+    drawArrowHead(base, tip, color);
+    ctx.font = selected ? "bold 12px sans-serif" : "12px sans-serif";
+    ctx.fillStyle = color;
+    ctx.fillText(side, tip.x - 8, tip.y + (tip.y > base.y ? 16 : -6));
+  });
+}
+
+// Flecha estática (no clickeable) mostrando el sentido ya configurado en
+// una línea guardada, para identificar de un vistazo qué lado cuenta cada una.
+function drawSavedArrow(l) {
+  if (!l.count_side || l.count_side === "AMBOS") return;
+  const arrow = sideArrows({ x: l.x1, y: l.y1 }, { x: l.x2, y: l.y2 }).find((a) => a.side === l.count_side);
+  if (arrow) drawArrowHead(arrow.base, arrow.tip, "#2f81f7");
+}
+
 function redraw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (frameImg) {
@@ -45,10 +113,12 @@ function redraw() {
   existingLines.forEach((l) => {
     const a = imageToCanvas(l.x1, l.y1), b = imageToCanvas(l.x2, l.y2);
     ctx.strokeStyle = "#2f81f7";
+    ctx.lineWidth = 3;
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     ctx.fillStyle = "#2f81f7";
     ctx.font = "13px sans-serif";
     ctx.fillText(`${l.name} (${l.movement})`, a.x + 4, a.y - 6);
+    drawSavedArrow(l);
   });
 
   // ROI guardado (naranja, semitransparente)
@@ -98,9 +168,11 @@ function redraw() {
   if (pointA && pointB) {
     const a = imageToCanvas(pointA.x, pointA.y), b = imageToCanvas(pointB.x, pointB.y);
     ctx.strokeStyle = "#3fb950";
+    ctx.lineWidth = 3;
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
     ctx.fillStyle = "#3fb950";
     ctx.beginPath(); ctx.arc(b.x, b.y, 5, 0, Math.PI * 2); ctx.fill();
+    drawInteractiveArrows(pointA, pointB);
   }
 }
 
@@ -116,6 +188,21 @@ canvas.addEventListener("click", (e) => {
     document.getElementById("saveRoi").disabled = roiPoints.length < 3;
     redraw();
     return;
+  }
+
+  // Si hay una línea trazada, un clic cerca de una de sus flechas de sentido
+  // asigna ese count_side (clic de nuevo sobre la ya elegida = volver a Ambos)
+  // en vez de reiniciar el trazo de puntos.
+  if (pointA && pointB) {
+    const sel = document.getElementById("lineCountSide");
+    const hit = sideArrows(pointA, pointB).find(
+      (arrow) => Math.hypot(cx - arrow.tip.x, cy - arrow.tip.y) <= ARROW_HIT_RADIUS
+    );
+    if (hit) {
+      sel.value = sel.value === hit.side ? "AMBOS" : hit.side;
+      redraw();
+      return;
+    }
   }
 
   if (!pointA || (pointA && pointB)) {
@@ -315,6 +402,7 @@ document.getElementById("camSelect").addEventListener("change", async (e) => {
 });
 document.getElementById("loadFrame").addEventListener("click", loadFrame);
 document.getElementById("saveLine").addEventListener("click", saveLine);
+document.getElementById("lineCountSide").addEventListener("change", redraw);
 document.getElementById("resetDraw").addEventListener("click", () => {
   exitEditMode();
   pointA = pointB = null;
