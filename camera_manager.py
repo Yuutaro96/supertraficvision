@@ -12,6 +12,7 @@ Los eventos de cruce se colocan en una cola global (EVENT_QUEUE) que la
 aplicación FastAPI drena para difundirlos por WebSocket.
 """
 
+import math
 import os
 import time
 import queue
@@ -118,20 +119,10 @@ class CameraStream:
             position=sv.Position.BOTTOM_CENTER,
         )
 
-        # Líneas virtuales con conteos IN/OUT, texto orientado a la línea
-        self.line_annotator = sv.LineZoneAnnotator(
-            thickness=3,
-            color=sv.Color.WHITE,
-            text_thickness=1,
-            text_scale=0.55,
-            text_padding=6,
-            custom_in_text="ENTRA",
-            custom_out_text="SALE",
-            text_orient_to_line=True,
-            display_in_count=True,
-            display_out_count=True,
-            display_text_box=True,
-        )
+        # Las líneas virtuales se dibujan a mano en _draw_lines() (línea
+        # delgada + nombre + flecha del sentido que cuenta), en vez de con
+        # sv.LineZoneAnnotator: sus cajas "ENTRA"/"SALE" con conteo eran
+        # demasiado grandes y no reflejaban el filtro count_side por línea.
 
     # ------------------------------------------------------------------
     def start(self):
@@ -267,10 +258,10 @@ class CameraStream:
         Ejecuta detección + tracking + conteo y dibuja anotaciones con
         los anotadores modernos de Supervision (v0.25+):
 
-          1. EllipseAnnotator  → elipse de color por clase bajo cada objeto
-          2. TraceAnnotator    → trayectoria de movimiento de cada objeto
-          3. LabelAnnotator    → etiqueta clase + tracking_id + confianza
-          4. LineZoneAnnotator → línea virtual con ENTRA / SALE
+          1. EllipseAnnotator → elipse de color por clase bajo cada objeto
+          2. TraceAnnotator   → trayectoria de movimiento de cada objeto
+          3. LabelAnnotator   → etiqueta con solo el nombre del objeto
+          4. _draw_lines()    → línea delgada + nombre + flecha del sentido
         """
         try:
             self.line_counter.reload_if_changed()
@@ -280,15 +271,11 @@ class CameraStream:
             annotated = frame.copy()
 
             if len(detections) > 0:
-                # --- Construir etiquetas (clase + id + confianza) ----------
+                # --- Etiqueta: solo el nombre del objeto -------------------
                 labels = []
                 for i in range(len(detections)):
                     class_id = int(detections.class_id[i]) if detections.class_id is not None else -1
-                    conf = float(detections.confidence[i]) if detections.confidence is not None else 0.0
-                    emoji = config.class_emoji(class_id)
-                    cname = config.class_name(class_id)
-                    tid = f"#{int(detections.tracker_id[i])} " if detections.tracker_id is not None else ""
-                    labels.append(f"{emoji} {tid}{cname} {conf:.0%}")
+                    labels.append(config.class_name(class_id))
 
                 # --- Anotaciones visuales (orden importa: trazo → elipse → label)
                 # 1. Trayectoria de movimiento
@@ -308,14 +295,8 @@ class CameraStream:
                 except queue.Full:
                     pass
 
-            # --- Dibujar cada línea virtual con su anotador ---------------
-            for wrapper in self.line_counter.lines:
-                try:
-                    annotated = self.line_annotator.annotate(
-                        annotated, line_counter=wrapper.zone
-                    )
-                except Exception:
-                    pass
+            # --- Dibujar cada línea virtual (delgada + nombre + flecha) ---
+            self._draw_lines(annotated)
 
             # --- Overlay con nombre de cámara y FPS -----------------------
             self._draw_overlay(annotated)
@@ -325,6 +306,47 @@ class CameraStream:
             print(f"[camera {self.id}] Error procesando frame: {exc}")
             self._draw_overlay(frame)
             return frame
+
+    # Mismo cálculo (producto cruzado) que usa sv.LineZone para decidir
+    # IN/OUT, y que ya usa el editor /lines para sus flechas: así la flecha
+    # dibujada aquí señala exactamente el lado que de verdad se cuenta.
+    _ARROW_OFFSET = 16
+    _ARROW_LEN = 20
+
+    def _side_arrow(self, x1, y1, x2, y2, side):
+        if side not in ("IN", "OUT"):
+            return None
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy) or 1
+        nx, ny = -dy / length, dx / length
+        mid = ((x1 + x2) / 2, (y1 + y2) / 2)
+        for cnx, cny in ((nx, ny), (-nx, -ny)):
+            base = (mid[0] + cnx * self._ARROW_OFFSET, mid[1] + cny * self._ARROW_OFFSET)
+            tip = (mid[0] + cnx * (self._ARROW_OFFSET + self._ARROW_LEN),
+                   mid[1] + cny * (self._ARROW_OFFSET + self._ARROW_LEN))
+            cross = dx * (tip[1] - y1) - dy * (tip[0] - x1)
+            if ("IN" if cross < 0 else "OUT") == side:
+                return base, tip
+        return None
+
+    def _draw_lines(self, frame: np.ndarray):
+        """Línea delgada (estilo del editor /lines) + nombre + flecha del
+        sentido que realmente se cuenta (count_side), en vez de las cajas
+        grandes ENTRA/SALE de sv.LineZoneAnnotator."""
+        color = (80, 185, 63)  # BGR de #3fb950, mismo verde del editor
+        for wrapper in self.line_counter.lines:
+            p1, p2 = (wrapper.x1, wrapper.y1), (wrapper.x2, wrapper.y2)
+            cv2.line(frame, p1, p2, color, 2, cv2.LINE_AA)
+            cv2.putText(frame, f"{wrapper.name} ({wrapper.movement})",
+                        (p1[0] + 4, p1[1] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.42,
+                        color, 1, cv2.LINE_AA)
+            arrow = self._side_arrow(*p1, *p2, wrapper.count_side)
+            if arrow:
+                base, tip = arrow
+                cv2.arrowedLine(
+                    frame, (int(base[0]), int(base[1])), (int(tip[0]), int(tip[1])),
+                    color, 2, cv2.LINE_AA, tipLength=0.4,
+                )
 
     def _draw_overlay(self, frame: np.ndarray):
         h, w = frame.shape[:2]

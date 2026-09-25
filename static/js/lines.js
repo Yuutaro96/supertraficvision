@@ -14,6 +14,13 @@ let mode = "line";        // "line" | "roi"
 let existingRoi = [];     // puntos guardados en el servidor
 let roiPoints = [];       // puntos en edición (antes de guardar)
 
+// Arrastre de los extremos A/B de la línea en edición (para reposicionarla
+// sin tener que volver a trazarla desde cero).
+const POINT_HIT_RADIUS = 9;
+let draggingPoint = null; // "A" | "B" | null
+let dragMoved = false;
+let suppressNextClick = false;
+
 function scaleFactors() {
   return { sx: canvas.width / imgW, sy: canvas.height / imgH };
 }
@@ -26,6 +33,14 @@ function canvasToImage(cx, cy) {
 function imageToCanvas(ix, iy) {
   const { sx, sy } = scaleFactors();
   return { x: ix * sx, y: iy * sy };
+}
+
+function eventToCanvas(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    cx: (e.clientX - rect.left) * (canvas.width / rect.width),
+    cy: (e.clientY - rect.top) * (canvas.height / rect.height),
+  };
 }
 
 // Distancia (offset) y largo de las flechas de sentido, en px de canvas.
@@ -176,11 +191,47 @@ function redraw() {
   }
 }
 
+canvas.addEventListener("mousedown", (e) => {
+  if (mode !== "line" || !pointA || !pointB) return;
+  const { cx, cy } = eventToCanvas(e);
+  const a = imageToCanvas(pointA.x, pointA.y), b = imageToCanvas(pointB.x, pointB.y);
+  if (Math.hypot(cx - a.x, cy - a.y) <= POINT_HIT_RADIUS) draggingPoint = "A";
+  else if (Math.hypot(cx - b.x, cy - b.y) <= POINT_HIT_RADIUS) draggingPoint = "B";
+  else return;
+  dragMoved = false;
+  e.preventDefault();
+});
+
+canvas.addEventListener("mousemove", (e) => {
+  const { cx, cy } = eventToCanvas(e);
+  if (draggingPoint) {
+    dragMoved = true;
+    const p = canvasToImage(cx, cy);
+    if (draggingPoint === "A") pointA = p; else pointB = p;
+    updateCoords();
+    redraw();
+    return;
+  }
+  if (mode === "line" && pointA && pointB) {
+    const a = imageToCanvas(pointA.x, pointA.y), b = imageToCanvas(pointB.x, pointB.y);
+    const overPoint = Math.hypot(cx - a.x, cy - a.y) <= POINT_HIT_RADIUS
+      || Math.hypot(cx - b.x, cy - b.y) <= POINT_HIT_RADIUS;
+    canvas.style.cursor = overPoint ? "grab" : "crosshair";
+  }
+});
+
+window.addEventListener("mouseup", () => {
+  if (draggingPoint) {
+    if (dragMoved) suppressNextClick = true; // evita que el click posterior cree un punto nuevo
+    draggingPoint = null;
+    canvas.style.cursor = "crosshair";
+  }
+});
+
 canvas.addEventListener("click", (e) => {
+  if (suppressNextClick) { suppressNextClick = false; return; }
   if (!frameImg) { toast("Primero carga el frame de una cámara", true); return; }
-  const rect = canvas.getBoundingClientRect();
-  const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
-  const cy = (e.clientY - rect.top) * (canvas.height / rect.height);
+  const { cx, cy } = eventToCanvas(e);
   const p = canvasToImage(cx, cy);
 
   if (mode === "roi") {
