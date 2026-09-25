@@ -332,11 +332,21 @@ class CameraStream:
     def _draw_lines(self, frame: np.ndarray):
         """Línea delgada (estilo del editor /lines) + nombre + flecha del
         sentido que realmente se cuenta (count_side), en vez de las cajas
-        grandes ENTRA/SALE de sv.LineZoneAnnotator."""
-        color = (80, 185, 63)  # BGR de #3fb950, mismo verde del editor
+        grandes ENTRA/SALE de sv.LineZoneAnnotator.
+
+        Todo se dibuja con un "halo" negro debajo (línea/flecha más gruesas
+        en negro, luego el color encima más delgado) y el texto sobre una
+        caja negra sólida, para que se lea con buen contraste sin importar
+        qué haya de fondo en el video (asfalto claro, vegetación, etc.).
+        """
+        color = (60, 235, 90)  # BGR: verde saturado, más contrastante que antes
+        outline = (0, 0, 0)
+        font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1
         for wrapper in self.line_counter.lines:
             p1, p2 = (wrapper.x1, wrapper.y1), (wrapper.x2, wrapper.y2)
+            cv2.line(frame, p1, p2, outline, 4, cv2.LINE_AA)
             cv2.line(frame, p1, p2, color, 2, cv2.LINE_AA)
+
             # Contador: el que corresponde al sentido que realmente se
             # persiste (count_side), para que coincida con lo que se ve en
             # reportes en vez de mostrar cruces en reversa que se descartan.
@@ -346,16 +356,20 @@ class CameraStream:
                 count = wrapper.zone.out_count
             else:
                 count = wrapper.zone.in_count + wrapper.zone.out_count
-            cv2.putText(frame, f"{wrapper.name} ({wrapper.movement}) · {count}",
-                        (p1[0] + 4, p1[1] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.42,
-                        color, 1, cv2.LINE_AA)
+
+            label = f"{wrapper.name} ({wrapper.movement}) · {count}"
+            (tw, th), baseline = cv2.getTextSize(label, font, scale, thick)
+            tx, ty = p1[0] + 4, p1[1] - 10  # separado de la línea, no encima
+            cv2.rectangle(frame, (tx - 3, ty - th - 3), (tx + tw + 3, ty + baseline + 3),
+                          (0, 0, 0), -1)
+            cv2.putText(frame, label, (tx, ty), font, scale, color, thick, cv2.LINE_AA)
+
             arrow = self._side_arrow(*p1, *p2, wrapper.count_side)
             if arrow:
                 base, tip = arrow
-                cv2.arrowedLine(
-                    frame, (int(base[0]), int(base[1])), (int(tip[0]), int(tip[1])),
-                    color, 2, cv2.LINE_AA, tipLength=0.4,
-                )
+                base_i, tip_i = (int(base[0]), int(base[1])), (int(tip[0]), int(tip[1]))
+                cv2.arrowedLine(frame, base_i, tip_i, outline, 4, cv2.LINE_AA, tipLength=0.4)
+                cv2.arrowedLine(frame, base_i, tip_i, color, 2, cv2.LINE_AA, tipLength=0.4)
 
     def _draw_overlay(self, frame: np.ndarray):
         h, w = frame.shape[:2]

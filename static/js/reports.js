@@ -15,6 +15,29 @@ function buildQuery() {
   return params;
 }
 
+function toDatetimeLocalValue(d) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function setRangeToday() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0);
+  document.getElementById("fFrom").value = toDatetimeLocalValue(start);
+  document.getElementById("fTo").value = toDatetimeLocalValue(now);
+  loadReport();
+}
+
+function setRangeWeek() {
+  const now = new Date();
+  const day = now.getDay(); // 0=domingo ... 6=sábado
+  const diffToMonday = day === 0 ? 6 : day - 1;
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diffToMonday, 0, 0);
+  document.getElementById("fFrom").value = toDatetimeLocalValue(monday);
+  document.getElementById("fTo").value = toDatetimeLocalValue(now);
+  loadReport();
+}
+
 async function loadFilters() {
   const [cams] = await Promise.all([API.get("/api/cameras"), loadMeta()]);
   const camSel = document.getElementById("fCamera");
@@ -117,6 +140,8 @@ async function resetRemoteReports() {
 }
 
 document.getElementById("applyFilter").addEventListener("click", loadReport);
+document.getElementById("rangeToday").addEventListener("click", setRangeToday);
+document.getElementById("rangeWeek").addEventListener("click", setRangeWeek);
 document.getElementById("exportCsv").addEventListener("click", exportCsv);
 document.getElementById("resetRemote").addEventListener("click", resetRemoteReports);
 

@@ -250,6 +250,20 @@ input, select {
   font-family: var(--font-ui);
 }
 input:focus, select:focus { outline: none; border-color: var(--cyan); }
+/* El ícono nativo del selector de fecha/hora es oscuro por defecto y se
+   vuelve invisible (parece que "no funciona") sobre este fondo oscuro. */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.85);
+  cursor: pointer;
+  opacity: 0.8;
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
 label.check { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 label.check input { min-width: auto; accent-color: var(--cyan); }
 
