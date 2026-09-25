@@ -7,6 +7,7 @@ un frame con las detecciones (ya trackeadas), se evalúa el cruce de cada
 objeto por cada línea y se registra el cruce (IN/OUT) en la base de datos.
 """
 
+import time
 from collections import Counter, defaultdict
 from typing import Dict, List, Tuple
 
@@ -76,7 +77,16 @@ class LineCounter:
         # más frecuente al momento del cruce en vez de confiar en un único
         # frame (donde YOLO puede confundir, por ejemplo, auto con camión).
         self._track_votes: Dict[int, Counter] = defaultdict(Counter)
+        # Pares de líneas (entrada+salida) para confirmar giros por tracker_id.
+        self.pairs: List[Dict] = []
+        self._entry_pairs_by_line: Dict[int, List[Dict]] = defaultdict(list)
+        self._exit_pairs_by_line: Dict[int, List[Dict]] = defaultdict(list)
+        # tracker_id -> [{"pair_id", "expires_at" (monotonic), "class_id"}]
+        self._pending_pairs: Dict[int, List[Dict]] = defaultdict(list)
+        self._pair_confirmed: Dict[int, int] = defaultdict(int)
+        self._pair_expired: Dict[int, int] = defaultdict(int)
         self.load_lines()
+        self.load_pairs()
 
     def load_lines(self):
         """(Re)carga las líneas de la cámara desde la base de datos.
@@ -109,6 +119,37 @@ class LineCounter:
         db_ids = {r["id"] for r in rows}
         if current_ids != db_ids:
             self.load_lines()
+            self.load_pairs()
+
+    def load_pairs(self):
+        """(Re)carga los pares entrada/salida (giros confirmados) de la cámara.
+
+        Se apoya en self.lines (ya cargadas) para resolver el count_side de
+        las líneas de entrada/salida de cada par, así no hace falta otra
+        consulta a la base por línea.
+        """
+        line_side_by_id = {w.id: w.count_side for w in self.lines}
+        rows = database.get_line_pairs(self.camera_id)
+        self.pairs = []
+        self._entry_pairs_by_line = defaultdict(list)
+        self._exit_pairs_by_line = defaultdict(list)
+        for r in rows:
+            pair = {
+                "id": r["id"],
+                "name": r["name"],
+                "movement": r["movement"],
+                "entry_line_id": r["entry_line_id"],
+                "exit_line_id": r["exit_line_id"],
+                "virtual_line_id": r["virtual_line_id"],
+                "max_seconds": r["max_seconds"],
+                # Si la línea de entrada/salida ya no existe (borrada), AMBOS
+                # como fallback nunca dispara (no hay línea que la cruce).
+                "entry_side": line_side_by_id.get(r["entry_line_id"], "AMBOS"),
+                "exit_side": line_side_by_id.get(r["exit_line_id"], "AMBOS"),
+            }
+            self.pairs.append(pair)
+            self._entry_pairs_by_line[pair["entry_line_id"]].append(pair)
+            self._exit_pairs_by_line[pair["exit_line_id"]].append(pair)
 
     def _update_votes(self, detections: sv.Detections) -> None:
         if detections.tracker_id is None or detections.class_id is None:
@@ -129,6 +170,87 @@ class LineCounter:
             return fallback_class_id
         return votes.most_common(1)[0][0]
 
+    def _prune_expired_pairs(self, now: float) -> None:
+        for tid in list(self._pending_pairs):
+            kept = []
+            for entry in self._pending_pairs[tid]:
+                if entry["expires_at"] < now:
+                    self._pair_expired[entry["pair_id"]] += 1
+                else:
+                    kept.append(entry)
+            if kept:
+                self._pending_pairs[tid] = kept
+            else:
+                del self._pending_pairs[tid]
+
+    def _register_pair_entries(self, wrapper_id: int, tracker_id: int,
+                                direction: str, class_id: int, now: float) -> None:
+        for pair in self._entry_pairs_by_line.get(wrapper_id, []):
+            if pair["entry_side"] not in ("AMBOS", direction):
+                continue
+            self._pending_pairs[tracker_id].append({
+                "pair_id": pair["id"],
+                "expires_at": now + pair["max_seconds"],
+                "class_id": class_id,
+            })
+
+    def _try_confirm_pairs(self, wrapper_id: int, tracker_id: int,
+                            direction: str, fallback_class_id: int, now: float) -> List[Dict]:
+        """Si esta línea es la salida de algún par y hay una entrada pendiente
+        para este tracker_id dentro de la ventana, confirma el giro: registra
+        UN conteo bajo la línea virtual del par y limpia todos los pendientes
+        de este vehículo (solo puede completar un movimiento a la vez)."""
+        events: List[Dict] = []
+        pending = self._pending_pairs.get(tracker_id)
+        if not pending:
+            return events
+        exit_pairs = {p["id"]: p for p in self._exit_pairs_by_line.get(wrapper_id, [])}
+        if not exit_pairs:
+            return events
+        match = None
+        for entry in pending:
+            pair = exit_pairs.get(entry["pair_id"])
+            if pair and pair["exit_side"] in ("AMBOS", direction) and entry["expires_at"] >= now:
+                match = pair
+                break
+        if match is None:
+            return events
+
+        class_id = self._voted_class(tracker_id, fallback_class_id)
+        cname = config.class_name(class_id)
+        database.record_count(
+            camera_id=self.camera_id,
+            line_id=match["virtual_line_id"],
+            class_name=cname,
+            direction="IN",
+            count=1,
+        )
+        events.append({
+            "camera_id": self.camera_id,
+            "line_id": match["virtual_line_id"],
+            "line_name": match["name"],
+            "movement": match["movement"],
+            "class_name": cname,
+            "emoji": config.class_emoji(class_id),
+            "direction": "IN",
+        })
+        self._pair_confirmed[match["id"]] += 1
+        # Un vehículo solo completa un giro: se descartan sus demás pendientes.
+        del self._pending_pairs[tracker_id]
+        return events
+
+    def get_pair_states(self) -> List[Dict]:
+        return [
+            {
+                "id": p["id"],
+                "name": p["name"],
+                "movement": p["movement"],
+                "confirmed": self._pair_confirmed.get(p["id"], 0),
+                "expired": self._pair_expired.get(p["id"], 0),
+            }
+            for p in self.pairs
+        ]
+
     def update(self, detections: sv.Detections) -> List[Dict]:
         """
         Evalúa el cruce de las detecciones sobre cada línea.
@@ -141,6 +263,10 @@ class LineCounter:
 
         self._update_votes(detections)
 
+        now = time.monotonic()
+        if self.pairs:
+            self._prune_expired_pairs(now)
+
         for wrapper in self.lines:
             try:
                 crossed_in, crossed_out = wrapper.zone.trigger(detections)
@@ -148,17 +274,29 @@ class LineCounter:
                 print(f"[counter] Error en trigger de línea {wrapper.id}: {exc}")
                 continue
 
-            # Registrar cruces, filtrando por el sentido configurado en la línea
             for mask, direction in ((crossed_in, "IN"), (crossed_out, "OUT")):
                 if mask is None:
-                    continue
-                if wrapper.count_side != "AMBOS" and wrapper.count_side != direction:
                     continue
                 idxs = np.where(mask)[0]
                 for i in idxs:
                     class_id = int(detections.class_id[i]) if detections.class_id is not None else -1
-                    if detections.tracker_id is not None:
-                        class_id = self._voted_class(detections.tracker_id[i], class_id)
+                    tracker_id = int(detections.tracker_id[i]) if detections.tracker_id is not None else None
+                    if tracker_id is not None:
+                        class_id = self._voted_class(tracker_id, class_id)
+
+                        # Par de líneas: si esta línea es entrada/salida de algún
+                        # giro, llevar la cuenta independientemente de si su
+                        # propio count_side persiste este cruce como línea suelta.
+                        if wrapper.id in self._entry_pairs_by_line:
+                            self._register_pair_entries(wrapper.id, tracker_id, direction, class_id, now)
+                        if wrapper.id in self._exit_pairs_by_line:
+                            events.extend(self._try_confirm_pairs(
+                                wrapper.id, tracker_id, direction, class_id, now))
+
+                    # Registrar el cruce de la línea "suelta", filtrando por su
+                    # sentido configurado (independiente del conteo por pares).
+                    if wrapper.count_side != "AMBOS" and wrapper.count_side != direction:
+                        continue
                     cname = config.class_name(class_id)
                     database.record_count(
                         camera_id=self.camera_id,

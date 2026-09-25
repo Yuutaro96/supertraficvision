@@ -56,8 +56,25 @@ def init_db() -> None:
                 y2          INTEGER NOT NULL,
                 movement    TEXT NOT NULL DEFAULT 'RECTO',
                 count_side  TEXT NOT NULL DEFAULT 'AMBOS',
+                source      TEXT NOT NULL DEFAULT 'manual',
                 created_at  TEXT NOT NULL,
                 FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS line_pairs (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                camera_id      INTEGER NOT NULL,
+                name           TEXT NOT NULL,
+                movement       TEXT NOT NULL DEFAULT 'GIRO_IZQ',
+                entry_line_id  INTEGER NOT NULL,
+                exit_line_id   INTEGER NOT NULL,
+                virtual_line_id INTEGER NOT NULL,
+                max_seconds    INTEGER NOT NULL DEFAULT 15,
+                created_at     TEXT NOT NULL,
+                FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
+                FOREIGN KEY (entry_line_id) REFERENCES lines(id) ON DELETE CASCADE,
+                FOREIGN KEY (exit_line_id) REFERENCES lines(id) ON DELETE CASCADE,
+                FOREIGN KEY (virtual_line_id) REFERENCES lines(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS counts (
@@ -96,6 +113,7 @@ def init_db() -> None:
             "ALTER TABLE cameras ADD COLUMN control_protocol TEXT NOT NULL DEFAULT 'none'",
             "ALTER TABLE cameras ADD COLUMN control_config TEXT",
             "ALTER TABLE lines ADD COLUMN count_side TEXT NOT NULL DEFAULT 'AMBOS'",
+            "ALTER TABLE lines ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'",
         ):
             try:
                 conn.execute(ddl)
@@ -267,9 +285,16 @@ def set_roi(camera_id: int, points: List[List[int]]) -> None:
 # Líneas
 # ---------------------------------------------------------------------------
 def get_lines(camera_id: int) -> List[Dict]:
+    """Líneas "reales" (dibujadas a mano) de una cámara.
+
+    Excluye las líneas virtuales que crea un line_pair para acumular sus
+    conteos confirmados: no tienen geometría real, así que no deben
+    evaluarse como sv.LineZone (magnitud cero) ni mostrarse en el editor.
+    """
     with _lock, _connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM lines WHERE camera_id = ? ORDER BY id", (camera_id,)
+            "SELECT * FROM lines WHERE camera_id = ? AND source != 'pair' ORDER BY id",
+            (camera_id,),
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -281,12 +306,13 @@ def get_line(line_id: int) -> Optional[Dict]:
 
 
 def create_line(camera_id: int, name: str, x1: int, y1: int, x2: int, y2: int,
-                movement: str = "RECTO", count_side: str = "AMBOS") -> Dict:
+                movement: str = "RECTO", count_side: str = "AMBOS",
+                source: str = "manual") -> Dict:
     with _lock, _connect() as conn:
         cur = conn.execute(
-            "INSERT INTO lines(camera_id, name, x1, y1, x2, y2, movement, count_side, created_at) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (camera_id, name, x1, y1, x2, y2, movement, count_side, datetime.now().isoformat()),
+            "INSERT INTO lines(camera_id, name, x1, y1, x2, y2, movement, count_side, source, created_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (camera_id, name, x1, y1, x2, y2, movement, count_side, source, datetime.now().isoformat()),
         )
         conn.commit()
         lid = cur.lastrowid
@@ -311,10 +337,80 @@ def update_line(line_id: int, **kwargs) -> Optional[Dict]:
 
 
 def delete_line(line_id: int) -> bool:
+    # SQLite FK enforcement no está activado (PRAGMA foreign_keys off por
+    # defecto, igual que el resto de FKs "documentales" de este esquema), así
+    # que si esta línea es entrada/salida de algún par hay que borrar ese par
+    # (y su línea virtual) a mano para no dejar un line_pairs huérfano.
+    with _lock, _connect() as conn:
+        dependent = conn.execute(
+            "SELECT id FROM line_pairs WHERE entry_line_id = ? OR exit_line_id = ?",
+            (line_id, line_id),
+        ).fetchall()
+    for row in dependent:
+        delete_line_pair(row["id"])
+
     with _lock, _connect() as conn:
         cur = conn.execute("DELETE FROM lines WHERE id = ?", (line_id,))
         conn.commit()
     return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Pares de líneas (entrada + salida) - giros confirmados por tracker_id
+# ---------------------------------------------------------------------------
+def get_line_pairs(camera_id: int) -> List[Dict]:
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM line_pairs WHERE camera_id = ? ORDER BY id", (camera_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_line_pair(pair_id: int) -> Optional[Dict]:
+    with _lock, _connect() as conn:
+        row = conn.execute("SELECT * FROM line_pairs WHERE id = ?", (pair_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_line_pair(camera_id: int, name: str, movement: str,
+                      entry_line_id: int, exit_line_id: int,
+                      max_seconds: int = 15) -> Dict:
+    """Crea el par y, junto con él, la línea virtual donde se acumulan sus
+    conteos confirmados (sin geometría real: no se evalúa como sv.LineZone)."""
+    with _lock, _connect() as conn:
+        entry = conn.execute("SELECT camera_id FROM lines WHERE id = ?", (entry_line_id,)).fetchone()
+        exitl = conn.execute("SELECT camera_id FROM lines WHERE id = ?", (exit_line_id,)).fetchone()
+        if not entry or not exitl or entry["camera_id"] != camera_id or exitl["camera_id"] != camera_id:
+            raise ValueError("entry_line_id/exit_line_id deben pertenecer a la misma cámara")
+        cur = conn.execute(
+            "INSERT INTO lines(camera_id, name, x1, y1, x2, y2, movement, count_side, source, created_at) "
+            "VALUES(?, ?, 0, 0, 0, 0, ?, 'AMBOS', 'pair', ?)",
+            (camera_id, name, movement, datetime.now().isoformat()),
+        )
+        virtual_line_id = cur.lastrowid
+        cur = conn.execute(
+            "INSERT INTO line_pairs(camera_id, name, movement, entry_line_id, exit_line_id, "
+            "virtual_line_id, max_seconds, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            (camera_id, name, movement, entry_line_id, exit_line_id, virtual_line_id,
+             max_seconds, datetime.now().isoformat()),
+        )
+        conn.commit()
+        pid = cur.lastrowid
+    return get_line_pair(pid)
+
+
+def delete_line_pair(pair_id: int) -> bool:
+    pair = get_line_pair(pair_id)
+    if not pair:
+        return False
+    with _lock, _connect() as conn:
+        conn.execute("DELETE FROM line_pairs WHERE id = ?", (pair_id,))
+        # Borra también su línea virtual (y por cascada sus counts asociados
+        # no se tocan: counts.line_id no tiene ON DELETE CASCADE, quedan como
+        # historial con line_name resuelto vía LEFT JOIN al momento de leer).
+        conn.execute("DELETE FROM lines WHERE id = ?", (pair["virtual_line_id"],))
+        conn.commit()
+    return True
 
 
 # ---------------------------------------------------------------------------

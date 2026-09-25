@@ -78,6 +78,43 @@
         </table>
       </div>
     </div>
+
+    <div class="card mt">
+      <h2>Giros confirmados (par de líneas)</h2>
+      <p class="muted small" style="margin:0 0 10px">
+        Para carriles donde varios movimientos se mezclan: un giro solo cuenta si el
+        <b>mismo vehículo</b> cruza primero la línea de <b>entrada</b> (boca del carril) y
+        después la de <b>salida</b> (ya en la calle destino), dentro de la ventana de tiempo.
+        Si solo cruza una de las dos, no se cuenta — así se evita mezclar movimientos de otros carriles.
+      </p>
+      <div class="form-row">
+        <div class="field">
+          <label>Línea de entrada</label>
+          <select id="pairEntryLine"></select>
+        </div>
+        <div class="field">
+          <label>Línea de salida</label>
+          <select id="pairExitLine"></select>
+        </div>
+        <div class="field">
+          <label>Nombre del giro</label>
+          <input id="pairName" placeholder="Ej. Godina → Quito Este">
+        </div>
+        <div class="field">
+          <label>Movimiento</label>
+          <select id="pairMovement"></select>
+        </div>
+        <div class="field">
+          <label>Ventana (segundos)</label>
+          <input id="pairMaxSeconds" type="number" min="1" max="120" value="15" style="width:70px">
+        </div>
+        <button class="btn green" id="savePair">Crear par</button>
+      </div>
+      <table class="mt">
+        <thead><tr><th>Nombre</th><th>Movimiento</th><th>Entrada → Salida</th><th>Ventana</th><th class="right">Acción</th></tr></thead>
+        <tbody id="pairTable"></tbody>
+      </table>
+    </div>
   </div>
 
   <div class="toast" id="toast"></div>

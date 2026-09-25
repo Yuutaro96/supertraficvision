@@ -112,6 +112,22 @@ class LineUpdate(BaseModel):
         return v
 
 
+class LinePairIn(BaseModel):
+    camera_id: int
+    name: str
+    movement: str = "GIRO_IZQ"
+    entry_line_id: int
+    exit_line_id: int
+    max_seconds: int = 15
+
+    @field_validator("movement")
+    @classmethod
+    def _validate_movement(cls, v):
+        if v not in config.MOVEMENT_LABELS:
+            raise ValueError(f"movement debe ser uno de: {', '.join(config.MOVEMENT_LABELS)}")
+        return v
+
+
 class SettingsIn(BaseModel):
     confidence: Optional[float] = None
     model_size: Optional[str] = None
@@ -420,6 +436,39 @@ def delete_line(line_id: int):
         raise HTTPException(status_code=404, detail="Línea no encontrada")
     database.delete_line(line_id)
     manager.reload_lines(line["camera_id"])
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# API Pares de líneas (giros confirmados por tracker_id: entrada + salida)
+# ---------------------------------------------------------------------------
+@app.get("/api/line-pairs/{camera_id}")
+def list_line_pairs(camera_id: int):
+    return database.get_line_pairs(camera_id)
+
+
+@app.post("/api/line-pairs")
+def create_line_pair(pair: LinePairIn):
+    if pair.entry_line_id == pair.exit_line_id:
+        raise HTTPException(status_code=400, detail="La línea de entrada y de salida deben ser distintas")
+    try:
+        created = database.create_line_pair(
+            pair.camera_id, pair.name, pair.movement,
+            pair.entry_line_id, pair.exit_line_id, pair.max_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    manager.reload_lines(pair.camera_id)
+    return created
+
+
+@app.delete("/api/line-pairs/{pair_id}")
+def delete_line_pair(pair_id: int):
+    pair = database.get_line_pair(pair_id)
+    if not pair:
+        raise HTTPException(status_code=404, detail="Par no encontrado")
+    database.delete_line_pair(pair_id)
+    manager.reload_lines(pair["camera_id"])
     return {"ok": True}
 
 

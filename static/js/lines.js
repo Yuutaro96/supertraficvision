@@ -233,7 +233,11 @@ async function loadCamsSelect() {
   const cams = await API.get("/api/cameras");
   const sel = document.getElementById("camSelect");
   sel.innerHTML = cams.map((c) => `<option value="${c.id}">${escapeHtml(c.name)} (#${c.id})</option>`).join("");
-  if (cams.length) { currentCam = parseInt(sel.value); await loadLines(); }
+  if (cams.length) {
+    currentCam = parseInt(sel.value);
+    await loadLines();
+    await loadPairs();
+  }
 }
 
 const COUNT_SIDE_LABELS = { AMBOS: "Ambos lados", IN: "Solo IN", OUT: "Solo OUT" };
@@ -245,6 +249,8 @@ async function loadMovements() {
   const sideSel = document.getElementById("lineCountSide");
   sideSel.innerHTML = META.count_sides
     .map((s) => `<option value="${s}">${COUNT_SIDE_LABELS[s] || s}</option>`).join("");
+  document.getElementById("pairMovement").innerHTML =
+    META.movements.map((m) => `<option value="${m}">${m}</option>`).join("");
 }
 
 async function loadFrame() {
@@ -268,7 +274,80 @@ async function loadLines() {
   if (!currentCam) return;
   existingLines = await API.get(`/api/lines/${currentCam}`);
   renderLineTable();
+  refreshPairLineSelects();
   redraw();
+}
+
+// ---------------------------------------------------------------------------
+// Pares de líneas (giros confirmados por tracker_id: entrada + salida)
+// ---------------------------------------------------------------------------
+let linePairs = [];
+
+function refreshPairLineSelects() {
+  const options = existingLines
+    .map((l) => `<option value="${l.id}">${escapeHtml(l.name)} (${escapeHtml(l.movement)})</option>`)
+    .join("");
+  const empty = `<option value="">— dibuja al menos 2 líneas primero —</option>`;
+  document.getElementById("pairEntryLine").innerHTML = options || empty;
+  document.getElementById("pairExitLine").innerHTML = options || empty;
+  document.getElementById("savePair").disabled = existingLines.length < 2;
+}
+
+async function loadPairs() {
+  if (!currentCam) return;
+  linePairs = await API.get(`/api/line-pairs/${currentCam}`);
+  renderPairTable();
+}
+
+function lineNameById(id) {
+  const l = existingLines.find((x) => x.id === id);
+  return l ? l.name : `#${id}`;
+}
+
+function renderPairTable() {
+  const tbody = document.getElementById("pairTable");
+  if (linePairs.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="muted">Sin giros confirmados definidos.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = linePairs.map((p) =>
+    `<tr>
+      <td>${escapeHtml(p.name)}</td>
+      <td>${escapeHtml(p.movement)}</td>
+      <td class="muted">${escapeHtml(lineNameById(p.entry_line_id))} → ${escapeHtml(lineNameById(p.exit_line_id))}</td>
+      <td class="muted">${p.max_seconds}s</td>
+      <td class="right"><button class="btn sm red" onclick="delPair(${p.id})">Eliminar</button></td>
+    </tr>`
+  ).join("");
+}
+
+async function savePair() {
+  if (!currentCam) return;
+  const entry_line_id = parseInt(document.getElementById("pairEntryLine").value);
+  const exit_line_id = parseInt(document.getElementById("pairExitLine").value);
+  const name = document.getElementById("pairName").value.trim();
+  const movement = document.getElementById("pairMovement").value;
+  const max_seconds = parseInt(document.getElementById("pairMaxSeconds").value) || 15;
+  if (!name) { toast("Ingresa un nombre para el giro", true); return; }
+  if (!entry_line_id || !exit_line_id) { toast("Elige línea de entrada y de salida", true); return; }
+  if (entry_line_id === exit_line_id) { toast("La entrada y la salida deben ser líneas distintas", true); return; }
+  try {
+    await API.post("/api/line-pairs", {
+      camera_id: currentCam, name, movement, entry_line_id, exit_line_id, max_seconds,
+    });
+    toast("Giro confirmado creado");
+    document.getElementById("pairName").value = "";
+    await loadPairs();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function delPair(id) {
+  if (!confirm("¿Eliminar este giro confirmado?")) return;
+  try {
+    await API.del(`/api/line-pairs/${id}`);
+    toast("Giro eliminado");
+    await loadPairs();
+  } catch (e) { toast(e.message, true); }
 }
 
 async function loadRoi() {
@@ -399,7 +478,9 @@ document.getElementById("camSelect").addEventListener("change", async (e) => {
   updateCoords();
   await loadLines();
   await loadRoi();
+  await loadPairs();
 });
+document.getElementById("savePair").addEventListener("click", savePair);
 document.getElementById("loadFrame").addEventListener("click", loadFrame);
 document.getElementById("saveLine").addEventListener("click", saveLine);
 document.getElementById("lineCountSide").addEventListener("change", redraw);
